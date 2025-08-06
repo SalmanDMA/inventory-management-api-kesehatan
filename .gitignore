@@ -1,0 +1,62 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Output of go build
+*.test
+*.out
+
+# Build and cache directories
+/bin/
+/build/
+/dist/
+/coverage/
+/*.log
+
+# Go workspace files
+*.prof
+*.pb.go
+*.pb.validate.go
+
+# Test result/output files
+*.coverprofile
+*.testresult
+*.testoutput
+*.tmp
+
+# Dependency directories (Go Modules)
+vendor/
+
+# IDE/editor specific
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# dotenv
+.env
+.env.*  # .env.local, .env.production, etc
+
+# Database / local file artifacts (opsional, jika ada)
+*.sqlite
+*.db
+*.pid
+*.lock
+
+# Fiber Swagger generated files (jika ada generate ke local)
+docs/*
+!docs/.gitkeep
+
+# Coolify config (opsional, tergantung cara pakai)
+.coolify/
+
+# Ignore uploaded files
+/public/uploads/
+/tmp/

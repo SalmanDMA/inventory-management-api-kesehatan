@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<meta http-equiv="X-UA-Compatible" content="ie=edge" />
+		<title>INVENTORY APP - Email Verification</title>
+
+		<link
+			href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap"
+			rel="stylesheet"
+		/>
+	</head>
+	<body
+		style="
+			margin: 0;
+			font-family: 'Poppins', sans-serif;
+			background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+			font-size: 14px;
+			padding: 20px 0;
+		"
+	>
+		<div
+			style="
+				max-width: 600px;
+				margin: 0 auto;
+				background: rgba(255, 255, 255, 0.95);
+				border-radius: 20px;
+				box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+				overflow: hidden;
+				backdrop-filter: blur(10px);
+			"
+		>
+			<!-- Header with gradient background -->
+			<header
+				style="background: linear-gradient(135deg, #5a67d8 0%, #667eea 100%); padding: 30px; text-align: center"
+			>
+				<table style="width: 100%; margin-bottom: 20px">
+					<tr>
+						<td style="text-align: left">
+							<h1
+								style="
+									margin: 0;
+									font-size: 28px;
+									font-weight: 800;
+									color: white;
+									text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+								"
+							>
+								📦 INVENTORY APP
+							</h1>
+						</td>
+						<td style="text-align: right; vertical-align: top">
+							<span
+								style="
+									background: rgba(255, 255, 255, 0.2);
+									padding: 6px 12px;
+									border-radius: 12px;
+									font-size: 11px;
+									color: white;
+									font-weight: 500;
+									white-space: nowrap;
+								"
+							>
+								{{ .Date }}
+							</span>
+						</td>
+					</tr>
+				</table>
+				<p style="margin: 0; color: rgba(255, 255, 255, 0.9); font-size: 16px; font-weight: 500">
+					Verify Your Email Address
+				</p>
+			</header>
+
+			<main style="padding: 50px 30px">
+				<!-- Illustration placeholder -->
+				<div style="text-align: center; margin-top: 40px; margin-bottom: 40px">
+					<table style="margin: 0 auto">
+						<tr>
+							<td style="text-align: center">
+								<div
+									style="
+										width: 120px;
+										height: 120px;
+										background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+										border-radius: 50%;
+										margin: 0 auto 0 auto;
+										display: inline-block;
+										line-height: 120px;
+										font-size: 48px;
+										text-align: center;
+									"
+								>
+									🔐
+								</div>
+							</td>
+						</tr>
+					</table>
+				</div>
+
+				<div style="text-align: center; max-width: 480px; margin: 0 auto">
+					<h2 style="margin: 0; font-size: 24px; font-weight: 700; color: #2d3748; margin-bottom: 16px">
+						Email Verification Required
+					</h2>
+
+					<p style="margin: 0; margin-bottom: 20px; font-size: 16px; font-weight: 500; color: #4a5568">
+						Hello <strong style="color: #5a67d8">{{ .Name }}</strong>! 👋
+					</p>
+
+					<div
+						style="
+							background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+							border-radius: 16px;
+							padding: 30px;
+							margin: 30px 0;
+							border-left: 4px solid #5a67d8;
+						"
+					>
+						<p style="margin: 0; font-weight: 500; letter-spacing: 0.3px; color: #2d3748; line-height: 1.6">
+							Thank you for choosing <strong style="color: #5a67d8">INVENTORY APP</strong>. To complete
+							your password reset process, please use the verification code below.
+						</p>
+					</div>
+
+					<!-- OTP Display -->
+					<div
+						style="
+							background: linear-gradient(135deg, #5a67d8 0%, #667eea 100%);
+							border-radius: 16px;
+							padding: 30px;
+							margin: 40px 0;
+							box-shadow: 0 10px 25px rgba(90, 103, 216, 0.3);
+						"
+					>
+						<p
+							style="
+								margin: 0;
+								color: white;
+								font-size: 14px;
+								font-weight: 500;
+								margin-bottom: 15px;
+								opacity: 0.9;
+							"
+						>
+							Your Verification Code
+						</p>
+						<p
+							style="
+								margin: 0;
+								font-size: 36px;
+								font-weight: 800;
+								letter-spacing: 8px;
+								color: white;
+								text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+								font-family: 'Courier New', monospace;
+							"
+						>
+							{{ .OTP }}
+						</p>
+					</div>
+
+					<!-- Security Notice -->
+					<div
+						style="
+							background: #fff5f5;
+							border: 1px solid #fed7d7;
+							border-radius: 12px;
+							padding: 20px;
+							margin: 30px 0;
+						"
+					>
+						<div style="display: flex; align-items: center; justify-content: center; margin-bottom: 12px">
+							<span style="font-size: 20px; margin-right: 8px">⚠️</span>
+							<strong style="color: #c53030; font-size: 14px">Security Notice</strong>
+						</div>
+						<p style="margin: 0; font-size: 13px; color: #742a2a; line-height: 1.5">
+							This code is valid for <strong>5 minutes only</strong>. Never share this code with anyone,
+							including Qualita employees. If you didn't request this, please ignore this email.
+						</p>
+					</div>
+
+					<!-- Support Section -->
+					<div
+						style="
+							background: #f0fff4;
+							border-radius: 12px;
+							padding: 25px;
+							margin: 30px 0;
+							text-align: center;
+						"
+					>
+						<p style="margin: 0; margin-bottom: 15px; font-weight: 600; color: #2d3748">
+							🤝 Need assistance?
+						</p>
+						<p style="margin: 0; font-size: 14px; color: #4a5568; line-height: 1.5">
+							Contact our support team at
+							<a
+								href="mailto:salmandma.work@gmail.com"
+								style="color: #38a169; text-decoration: none; font-weight: 600"
+							>
+								salmandma.work@gmail.com
+							</a>
+							<br />or visit our
+							<a
+								href="https://next-porto-salmandma.vercel.app"
+								target="_blank"
+								style="color: #38a169; text-decoration: none; font-weight: 600"
+							>
+								developer portfolio
+							</a>
+						</p>
+					</div>
+				</div>
+			</main>
+
+			<!-- Footer -->
+			<footer style="background: #f8f9fa; padding: 40px 30px; text-align: center; border-top: 1px solid #e2e8f0">
+				<div style="margin-bottom: 20px">
+					<p style="margin: 0; font-size: 16px; font-weight: 600; color: #2d3748">Salman Dwi Maulana Akbar</p>
+					<p style="margin: 5px 0 0 0; color: #718096; font-size: 14px">📍 Bekasi - 17142, Indonesia</p>
+				</div>
+
+				<!-- Social Media Links -->
+				<div style="margin: 25px 0">
+					<table style="margin: 0 auto">
+						<tr>
+							<td style="padding: 0 8px">
+								<a
+									href="https://www.facebook.com/salman.akbar.1865?locale=id_ID"
+									target="_blank"
+									style="text-decoration: none"
+								>
+									<table
+										style="
+											width: 40px;
+											height: 40px;
+											background-color: #1877f2;
+											border-radius: 20px;
+											margin: 0 auto;
+										"
+									>
+										<tr>
+											<td
+												style="
+													text-align: center;
+													vertical-align: middle;
+													color: white;
+													font-weight: bold;
+													font-size: 18px;
+												"
+											>
+												f
+											</td>
+										</tr>
+									</table>
+								</a>
+							</td>
+							<td style="padding: 0 8px">
+								<a
+									href="https://www.instagram.com/_slmndma_/"
+									target="_blank"
+									style="text-decoration: none"
+								>
+									<table
+										style="
+											width: 40px;
+											height: 40px;
+											background: linear-gradient(
+												45deg,
+												#f09433 0%,
+												#e6683c 25%,
+												#dc2743 50%,
+												#cc2366 75%,
+												#bc1888 100%
+											);
+											border-radius: 20px;
+											margin: 0 auto;
+										"
+									>
+										<tr>
+											<td
+												style="
+													text-align: center;
+													vertical-align: middle;
+													color: white;
+													font-weight: bold;
+													font-size: 16px;
+												"
+											>
+												📷
+											</td>
+										</tr>
+									</table>
+								</a>
+							</td>
+							<td style="padding: 0 8px">
+								<a href="https://x.com/salmandwimaula1" target="_blank" style="text-decoration: none">
+									<table
+										style="
+											width: 40px;
+											height: 40px;
+											background-color: #1da1f2;
+											border-radius: 20px;
+											margin: 0 auto;
+										"
+									>
+										<tr>
+											<td
+												style="
+													text-align: center;
+													vertical-align: middle;
+													color: white;
+													font-weight: bold;
+													font-size: 16px;
+												"
+											>
+												𝕏
+											</td>
+										</tr>
+									</table>
+								</a>
+							</td>
+						</tr>
+					</table>
+				</div>
+
+				<div style="border-top: 1px solid #e2e8f0; padding-top: 20px; margin-top: 25px">
+					<p style="margin: 0; color: #718096; font-size: 12px">
+						© {{ .Year }} Salman DMA. All rights reserved. | PT. Qualita Indonesia
+					</p>
+					<p style="margin: 5px 0 0 0; color: #a0aec0; font-size: 11px">
+						This is an automated message. Please do not reply to this email.
+					</p>
+				</div>
+			</footer>
+		</div>
+	</body>
+</html>
