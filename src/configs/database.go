@@ -2,6 +2,7 @@ package configs
 
 import (
 	"fmt"
+	"log"
 	"os"
 
 	"gorm.io/driver/postgres"
@@ -12,27 +13,29 @@ var DB *gorm.DB
 
 func ConnectDB() {
 	var err error
-	DB_NAME := os.Getenv("DB_NAME")
-	DB_USERNAME := os.Getenv("DB_USERNAME")
-	DB_PASSWORD := os.Getenv("DB_PASSWORD")
-	DB_HOST := os.Getenv("DB_HOST")
 
-	ENVIRONMENT := os.Getenv("ENVIRONMENT")
-
-	SSLMODE := "disable"
-
-	if ENVIRONMENT == "PRODUCTION" {
-		SSLMODE = "require"
+	dbName := os.Getenv("DB_NAME")
+	dbUser := os.Getenv("DB_USERNAME")
+	dbPass := os.Getenv("DB_PASSWORD")
+	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT") 
+	sslMode := os.Getenv("DB_SSLMODE")
+	if sslMode == "" {
+		sslMode = "disable"
+	}
+	if dbPort == "" {
+		dbPort = "5432"
 	}
 
-	POSTGRESQL := "postgres://" + DB_USERNAME + ":" + DB_PASSWORD + "@" + DB_HOST + "/" + DB_NAME + "?sslmode=" + SSLMODE + "&TimeZone=Asia/Jakarta"
+	dsn := fmt.Sprintf(
+		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=Asia/Jakarta",
+		dbHost, dbUser, dbPass, dbName, dbPort, sslMode,
+	)
 
-	dsn := POSTGRESQL
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
-
 	if err != nil {
-		panic("failed to connect database")
+		log.Fatalf("❌ Failed to connect to database: %v", err)
 	}
-	
-	fmt.Println("Connection Opened to Database")
+
+	fmt.Println("✅ Connected to PostgreSQL database")
 }
