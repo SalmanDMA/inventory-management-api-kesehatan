@@ -33,10 +33,6 @@ func UserControllerGetAll(ctx *fiber.Ctx) error {
 		return helpers.Response(ctx, fiber.StatusUnauthorized, "Unauthorized: User info not found", nil)
 	}
 
-	if userInfo.Role.Name != "DEVELOPER" && userInfo.Role.Name != "SUPERADMIN" {
-		return helpers.Response(ctx, fiber.StatusForbidden, "Forbidden: You do not have access to this resource", nil)
-	}
-
 	paginationReq := &models.PaginationRequest{}
 	if err := ctx.QueryParser(paginationReq); err != nil {
 		return helpers.Response(ctx, fiber.StatusBadRequest, "Invalid query parameters", nil)
@@ -240,7 +236,7 @@ func UserControllerUpdateProfile(ctx *fiber.Ctx) error {
 	uploadRepo := repositories.NewUploadRepository(configs.DB)
 	userService := services.NewUserService(userRepo,uploadRepo)
 
-	updatedUser, err := userService.UpdateUserProfile(userInfo.ID.String(), userUpdate, ctx, userInfo)
+	updatedUser, err := userService.UpdateUserProfile(userInfo.ID.String(), userUpdate)
 	if err != nil {
 		if err.Error() == "user not found" {
 			return helpers.Response(ctx, fiber.StatusNotFound, err.Error(), nil)
@@ -250,6 +246,38 @@ func UserControllerUpdateProfile(ctx *fiber.Ctx) error {
 
 	return helpers.Response(ctx, fiber.StatusOK, "Success update user profile", updatedUser)
 }
+
+// @Summary Upload avatar
+// @Description Update user avatar (multipart/form-data, field name: avatar)
+// @Tags User
+// @Accept mpfd
+// @Produce json
+// @Security ApiKeyAuth
+// @Param Authorization header string true "Bearer token"
+// @Param avatar formData file true "Avatar image (jpg/jpeg/png, <=2MB)"
+// @Success 200 {object} map[string]interface{} "data: { user, avatar_url }"
+// @Failure 400 {string} string
+// @Failure 401 {string} string
+// @Failure 500 {string} string
+// @Router /api/v1/user/me/avatar [post]
+func UserControllerUploadAvatar(ctx *fiber.Ctx) error {
+  userInfo, ok := ctx.Locals("userInfo").(*models.User)
+  if !ok {
+    return helpers.Response(ctx, fiber.StatusUnauthorized, "Unauthorized: User info not found", nil)
+  }
+
+  userRepo := repositories.NewUserRepository(configs.DB)
+  uploadRepo := repositories.NewUploadRepository(configs.DB)
+  userService := services.NewUserService(userRepo, uploadRepo)
+
+  updatedUser, svcErr := userService.UpdateAvatarOnly(userInfo.ID.String(), ctx)
+  if svcErr != nil {
+    return helpers.Response(ctx, fiber.StatusInternalServerError, svcErr.Error(), nil)
+  }
+
+  return helpers.Response(ctx, fiber.StatusOK, "Avatar updated", updatedUser)
+}
+
 
 
 // UserControllerUpdate adalah handler untuk endpoint user

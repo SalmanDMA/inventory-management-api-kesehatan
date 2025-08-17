@@ -28,8 +28,16 @@ func RouteInit(app *fiber.App) {
 	CategoryRoutes(v1)
 	ItemRoutes(v1)
 	ItemHistoryRoutes(v1)
+	AreaRoutes(v1)
+	FacilityRoutes(v1)
+	FacilityTypeRoutes(v1)
+	SalesPersonRoutes(v1)
+	SupplierRoutes(v1)
+	PurchaseOrderRoutes(v1)
+	PaymentRoutes(v1)
+	SalesOrderRoutes(v1)
+	NotificationRoutes(v1)
 }
-
 
 // HealthCheck godoc
 // @Summary Show the status of server.

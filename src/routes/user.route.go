@@ -8,13 +8,18 @@ import (
 
 func UserRoutes(r fiber.Router) {
 	usersGroup := r.Group("/user")
-	usersGroup.Use(middlewares.JWTProtected, middlewares.RBACMiddleware)
+
+	usersGroup.Use(middlewares.JWTProtected)
 	usersGroup.Get("/me", controllers.UserControllerGetProfile)
 	usersGroup.Put("/me", controllers.UserControllerUpdateProfile)
-	usersGroup.Put("/restore", controllers.UserControllerRestore)
-	usersGroup.Delete("/delete", controllers.UserControllerDelete)
-	usersGroup.Get("/", controllers.UserControllerGetAll)
-	usersGroup.Post("/", controllers.UserControllerCreate)
-	usersGroup.Get("/:id", controllers.UserControllerGetById)
-	usersGroup.Put("/:id", controllers.UserControllerUpdate)
+	usersGroup.Put("/me/avatar", controllers.UserControllerUploadAvatar)
+
+	protected := usersGroup.Group("/")
+	protected.Use(middlewares.RBACMiddleware)
+	protected.Put("/restore", controllers.UserControllerRestore)
+	protected.Delete("/delete", controllers.UserControllerDelete)
+	protected.Get("/", controllers.UserControllerGetAll)
+	protected.Post("/", controllers.UserControllerCreate)
+	protected.Get("/:id", controllers.UserControllerGetById)
+	protected.Put("/:id", controllers.UserControllerUpdate)
 }

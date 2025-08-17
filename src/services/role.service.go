@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 
@@ -119,61 +120,124 @@ func (service *RoleService) GetRoleByID(roleId string) (*models.ResponseGetRole,
 	}, nil
 }
 
-func (service *RoleService) CreateRole(roleRequest *models.RoleCreateRequest, ctx *fiber.Ctx, userInfo *models.User) ( *models.Role, error) {
-	if _, err := service.RoleRepository.FindByName(roleRequest.Name); err == nil {
-		return nil, errors.New("role already exists") 
-	} else if err != repositories.ErrRoleNotFound {
-		 return nil, errors.New("error checking role: " + err.Error())
+func (s *RoleService) CreateRole(req *models.RoleCreateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Role, error) {
+	_ = ctx
+	_ = userInfo
+
+	norm := func(v string) string { return strings.ToLower(strings.TrimSpace(v)) }
+
+	name  := norm(req.Name)
+	alias := norm(req.Alias)
+	color := norm(req.Color)
+
+	if name == "" {
+		return nil, errors.New("name is required")
+	}
+	if len(name) > 100 {
+		return nil, errors.New("name exceeds max length")
+	}
+	if alias != "" && len(alias) > 50 {
+		return nil, errors.New("alias exceeds max length")
+	}
+	if color != "" && !repositories.IsHexColor(color) {
+		return nil, errors.New("color must be a valid hex (e.g. #1a2b3c)")
 	}
 
-	newRole := &models.Role{
-		ID: 									uuid.New(),
-		Name:        roleRequest.Name,
-		Alias:       roleRequest.Alias,
-		Color:       roleRequest.Color,
-		Description: roleRequest.Description,
+	if _, err := s.RoleRepository.FindByName(name); err == nil {
+		return nil, errors.New("role name already exists")
+	} else if !errors.Is(err, repositories.ErrRoleNotFound) {
+		return nil, fmt.Errorf("check name failed: %w", err)
+	}
+	if alias != "" {
+		if _, err := s.RoleRepository.FindByAlias(alias); err == nil {
+			return nil, errors.New("role alias already exists")
+		} else if !errors.Is(err, repositories.ErrRoleNotFound) {
+			return nil, fmt.Errorf("check alias failed: %w", err)
+		}
 	}
 
-	role, err := service.RoleRepository.Insert(newRole)
+	role := &models.Role{
+		ID:          uuid.New(),
+		Name:        name,   
+		Alias:       alias,  
+		Color:       color,  
+		Description: req.Description,
+	}
 
+	created, err := s.RoleRepository.Insert(role)
 	if err != nil {
-		return nil, err
+		if repositories.IsUniqueViolation(err) {
+			return nil, errors.New("role name/alias already exists")
+		}
+		return nil, fmt.Errorf("insert role failed: %w", err)
 	}
-
-	return role, nil
+	return created, nil
 }
 
-func (service *RoleService) UpdateRole(roleID string, roleUpdate *models.RoleUpdateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Role, error) {
-	roleExists, err := service.RoleRepository.FindById(roleID, false)
+func (s *RoleService) UpdateRole(roleID string, upd *models.RoleUpdateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Role, error) {
+	_ = ctx
+	_ = userInfo
+
+	existing, err := s.RoleRepository.FindById(roleID, false)
 	if err != nil {
-		return nil, err
-	}
-	if roleExists == nil {
-		return nil, errors.New("role not found")
-	}
-
-	if roleUpdate.Name != "" {
-		roleExists.Name = roleUpdate.Name
+		if errors.Is(err, repositories.ErrRoleNotFound) {
+			return nil, errors.New("role not found")
+		}
+		return nil, fmt.Errorf("find role failed: %w", err)
 	}
 
-	if roleUpdate.Alias != "" {
-		roleExists.Alias = roleUpdate.Alias
+	norm := func(v string) string { return strings.ToLower(strings.TrimSpace(v)) }
+
+	if strings.TrimSpace(upd.Name) != "" {
+		newName := norm(upd.Name)
+		if len(newName) > 100 {
+			return nil, errors.New("name exceeds max length")
+		}
+		if newName != existing.Name {
+			if ex, err := s.RoleRepository.FindByName(newName); err == nil && ex.ID != existing.ID {
+				return nil, errors.New("role name already exists")
+			} else if err != nil && !errors.Is(err, repositories.ErrRoleNotFound) {
+				return nil, fmt.Errorf("check name failed: %w", err)
+			}
+			existing.Name = newName
+		}
 	}
 
-	if roleUpdate.Color != "" {
-		roleExists.Color = roleUpdate.Color
+	if strings.TrimSpace(upd.Alias) != "" {
+		newAlias := norm(upd.Alias)
+		if len(newAlias) > 50 {
+			return nil, errors.New("alias exceeds max length")
+		}
+		if newAlias != existing.Alias {
+			if ex, err := s.RoleRepository.FindByAlias(newAlias); err == nil && ex.ID != existing.ID {
+				return nil, errors.New("role alias already exists")
+			} else if err != nil && !errors.Is(err, repositories.ErrRoleNotFound) {
+				return nil, fmt.Errorf("check alias failed: %w", err)
+			}
+			existing.Alias = newAlias
+		}
 	}
 
-	if roleUpdate.Description != "" {
-		roleExists.Description = roleUpdate.Description
+	if strings.TrimSpace(upd.Color) != "" {
+		newColor := norm(upd.Color)
+		if newColor != "" && !repositories.IsHexColor(newColor) {
+			return nil, errors.New("color must be a valid hex (e.g. #1a2b3c)")
+		}
+		existing.Color = newColor
 	}
 
-	updateRole , err := service.RoleRepository.Update(roleExists)
+	if upd.Description != "" {
+		existing.Description = upd.Description
+	}
+
+	updated, err := s.RoleRepository.Update(existing)
 	if err != nil {
-		return nil, err
+		if repositories.IsUniqueViolation(err) {
+			return nil, errors.New("role name/alias already exists")
+		}
+		return nil, fmt.Errorf("update role failed: %w", err)
 	}
-
-	return updateRole, nil
+	return updated, nil
 }
 
 func (service *RoleService) DeleteRoles(roleRequest *models.RoleIsHardDeleteRequest, ctx *fiber.Ctx, userInfo *models.User) error {

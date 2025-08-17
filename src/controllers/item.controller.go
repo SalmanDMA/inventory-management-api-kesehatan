@@ -31,10 +31,6 @@ func ItemControllerGetAll(ctx *fiber.Ctx) error {
 		return helpers.Response(ctx, fiber.StatusUnauthorized, "Unauthorized: Unable to retrieve user information", nil)
 	}
 
-	if userInfo.Role.Name != "DEVELOPER" && userInfo.Role.Name != "SUPERADMIN" {
-		return helpers.Response(ctx, fiber.StatusForbidden, "Forbidden: You do not have access to view items", nil)
-	}
-
 	paginationReq := &models.PaginationRequest{}
 	if err := ctx.QueryParser(paginationReq); err != nil {
 		return helpers.Response(ctx, fiber.StatusBadRequest, "Invalid query parameters", nil)
@@ -114,10 +110,6 @@ func ItemControllerGetByID(c *fiber.Ctx) error {
 			return helpers.Response(ctx, fiber.StatusUnauthorized, "Unauthorized: User info not found", nil)
 		}
 
-		if userInfo.Role.Name != "DEVELOPER" && userInfo.Role.Name != "SUPERADMIN" {
-			return helpers.Response(ctx, fiber.StatusForbidden, "Forbidden: You do not have access to create items", nil)
-		}
-
 		itemRequest := new(models.ItemCreateRequest)
 		if err := ctx.BodyParser(itemRequest); err != nil {
 			return helpers.Response(ctx, fiber.StatusBadRequest, err.Error(), nil)
@@ -162,10 +154,6 @@ func ItemControllerGetByID(c *fiber.Ctx) error {
 			return helpers.Response(ctx, fiber.StatusUnauthorized, "Unauthorized: User info not found", nil)
 		}
 
-		if userInfo.Role.Name != "DEVELOPER" && userInfo.Role.Name != "SUPERADMIN" {
-			return helpers.Response(ctx, fiber.StatusForbidden, "Forbidden: You do not have access to update items", nil)
-		}
-
 		itemRequest := new(models.ItemUpdateRequest)
 		if err := ctx.BodyParser(itemRequest); err != nil {
 			return helpers.Response(ctx, fiber.StatusBadRequest, err.Error(), nil)
@@ -178,12 +166,12 @@ func ItemControllerGetByID(c *fiber.Ctx) error {
 
 		itemID := ctx.Params("id")
 
-		uploadRepo := repositories.NewUploadRepository(configs.DB)
+	uploadRepo := repositories.NewUploadRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
 	itemService := services.NewItemService(uploadRepo, itemRepo, itemHistoryRepo)
 
-		if _, err := itemService.UpdateItem(itemID, itemRequest, ctx, userInfo); err != nil {
+		if _, err := itemService.UpdateItem(itemRequest, itemID, ctx, userInfo); err != nil {
 			if err == repositories.ErrItemNotFound {
 				return helpers.Response(ctx, fiber.StatusNotFound, "Item not found", nil)
 			}
@@ -196,7 +184,7 @@ func ItemControllerGetByID(c *fiber.Ctx) error {
 
 // ItemControllerDelete adalah handler untuk endpoint item
 // @Summary Delete item
-// @Description Delete item. For now only accessible by items with DEVELOPER or SUPERADMIN items. If the item is hard deleted, the item's avatar will be deleted as well. If the item is soft deleted, the item's avatar will be retained. Hard delete mark with is_hard_delete = true and soft delete mark with is_hard_delete = false
+// @Description Delete item. For now only accessible by items with DEVELOPER or SUPERADMIN items. If the item is hard deleted, the item's image will be deleted as well. If the item is soft deleted, the item's image will be retained. Hard delete mark with is_hard_delete = true and soft delete mark with is_hard_delete = false
 // @Tags Item
 // @Accept json
 // @Produce json
@@ -213,10 +201,6 @@ func ItemControllerDelete(ctx *fiber.Ctx) error {
 		if !ok {
 						return helpers.Response(ctx, fiber.StatusUnauthorized, "Unauthorized: Item info not found", nil)
 		}
-
-	if userInfo.Role.Name != "DEVELOPER" && userInfo.Role.Name != "SUPERADMIN" {
-		return helpers.Response(ctx, fiber.StatusForbidden, "Forbidden: You do not have access to delete items", nil)
-	}
 
 	itemRequest := new(models.ItemIsHardDeleteRequest)
 	if err := ctx.BodyParser(itemRequest); err != nil {

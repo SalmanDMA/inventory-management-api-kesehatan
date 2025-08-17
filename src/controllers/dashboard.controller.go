@@ -20,6 +20,7 @@ import (
 func DashboardControllerGetSummary(c *fiber.Ctx) error {
 	dashboardService := services.NewDashboardService(
 		repositories.NewItemRepository(configs.DB),
+		repositories.NewSalesOrderRepository(configs.DB),
 	)
 
 	summary, err := dashboardService.GetDashboardSummary()

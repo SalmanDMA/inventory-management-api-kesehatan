@@ -1,5 +1,5 @@
 package jobs
 
-func StartAll() {
-	StartFileCleanupScheduler()
-}
+// func StartAll() {
+// 	StartFileCleanupScheduler()
+// }

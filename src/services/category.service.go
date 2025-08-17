@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
@@ -111,58 +112,98 @@ func (service *CategoryService) GetCategoryByID(categoryId string) (*models.Resp
 	}, nil
 }
 
-func (service *CategoryService) CreateCategory(categoryRequest *models.CategoryCreateRequest, ctx *fiber.Ctx, userInfo *models.User) ( *models.Category, error) {
-	if _, err := service.CategoryRepository.FindByName(categoryRequest.Name); err == nil {
-		return nil, errors.New("category already exists") 
-	} else if err != repositories.ErrCategoryNotFound {
-		 return nil, errors.New("error checking category: " + err.Error())
+func (s *CategoryService) CreateCategory(req *models.CategoryCreateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Category, error) {
+	_ = ctx
+	_ = userInfo
+
+	norm := func(v string) string { return strings.ToLower(strings.TrimSpace(v)) }
+
+	name := norm(req.Name)
+	color := norm(req.Color)
+	desc := req.Description
+
+	if name == "" {
+		return nil, errors.New("name is required")
+	}
+	if len(name) > 100 {
+		return nil, errors.New("name exceeds max length")
+	}
+	if color != "" && !repositories.IsHexColor(color) {
+		return nil, errors.New("color must be a valid hex (e.g. #1a2b3c)")
 	}
 
-	newCategory := &models.Category{
-		ID: 									uuid.New(),
-		Name:        categoryRequest.Name,
-		Color:       categoryRequest.Color,
-		Description: categoryRequest.Description,
+	if _, err := s.CategoryRepository.FindByName(name); err == nil {
+		return nil, errors.New("category already exists")
+	} else if !errors.Is(err, repositories.ErrCategoryNotFound) {
+		return nil, fmt.Errorf("check category failed: %w", err)
 	}
 
-	fmt.Println(newCategory, "newCategory")
+	cat := &models.Category{
+		ID:          uuid.New(),
+		Name:        name,   
+		Color:       color,  
+		Description: desc,
+	}
 
-	category, err := service.CategoryRepository.Insert(newCategory)
-
+	created, err := s.CategoryRepository.Insert(cat)
 	if err != nil {
-		return nil, err
+		if repositories.IsUniqueViolation(err) {
+			return nil, errors.New("category already exists")
+		}
+		return nil, fmt.Errorf("insert category failed: %w", err)
 	}
-
-	return category, nil
+	return created, nil
 }
 
-func (service *CategoryService) UpdateCategory(categoryID string, categoryUpdate *models.CategoryUpdateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Category, error) {
-	categoryExists, err := service.CategoryRepository.FindById(categoryID, false)
+func (s *CategoryService) UpdateCategory(categoryID string, upd *models.CategoryUpdateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Category, error) {
+	_ = ctx
+	_ = userInfo
+
+	existing, err := s.CategoryRepository.FindById(categoryID, false)
 	if err != nil {
-		return nil, err
-	}
-	if categoryExists == nil {
-		return nil, errors.New("category not found")
-	}
-
-	if categoryUpdate.Name != "" {
-		categoryExists.Name = categoryUpdate.Name
+		if errors.Is(err, repositories.ErrCategoryNotFound) {
+			return nil, errors.New("category not found")
+		}
+		return nil, fmt.Errorf("find category failed: %w", err)
 	}
 
-	if categoryUpdate.Color != "" {
-		categoryExists.Color = categoryUpdate.Color
+	norm := func(v string) string { return strings.ToLower(strings.TrimSpace(v)) }
+
+	if strings.TrimSpace(upd.Name) != "" {
+		newName := norm(upd.Name)
+		if len(newName) > 100 {
+			return nil, errors.New("name exceeds max length")
+		}
+		if newName != existing.Name {
+			if ex, err := s.CategoryRepository.FindByName(newName); err == nil && ex.ID != existing.ID {
+				return nil, errors.New("category already exists")
+			} else if err != nil && !errors.Is(err, repositories.ErrCategoryNotFound) {
+				return nil, fmt.Errorf("check category failed: %w", err)
+			}
+			existing.Name = newName
+		}
 	}
 
-	if categoryUpdate.Description != "" {
-		categoryExists.Description = categoryUpdate.Description
+	if strings.TrimSpace(upd.Color) != "" {
+		newColor := norm(upd.Color)
+		if newColor != "" && !repositories.IsHexColor(newColor) {
+			return nil, errors.New("color must be a valid hex (e.g. #1a2b3c)")
+		}
+		existing.Color = newColor
 	}
 
-	updateCategory , err := service.CategoryRepository.Update(categoryExists)
+	if upd.Description != "" {
+		existing.Description = upd.Description
+	}
+
+	updated, err := s.CategoryRepository.Update(existing)
 	if err != nil {
-		return nil, err
+		if repositories.IsUniqueViolation(err) {
+			return nil, errors.New("category already exists")
+		}
+		return nil, fmt.Errorf("update category failed: %w", err)
 	}
-	
-	return updateCategory, nil
+	return updated, nil
 }
 
 func (service *CategoryService) DeleteCategories(categoryRequest *models.CategoryIsHardDeleteRequest, ctx *fiber.Ctx, userInfo *models.User) error {

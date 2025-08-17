@@ -19,4 +19,4 @@ func RoleRoutes(r fiber.Router) {
 	// role module
 	rolesGroup.Get("/:roleId/module", controllers.GetModulesWithRoleInfo)
 	rolesGroup.Post("/:roleId/module", controllers.CreateOrUpdateRoleModule)
-	} 
+} 

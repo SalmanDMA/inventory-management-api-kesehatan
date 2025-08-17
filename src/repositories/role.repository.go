@@ -14,6 +14,7 @@ type RoleRepository interface {
 	FindAllPaginated(req *models.PaginationRequest) ([]models.Role, int64, error)
 	FindById(roleId string, isSoftDelete bool) (*models.Role, error)
 	FindByName(roleName string) (*models.Role, error)
+	FindByAlias(roleAlias string) (*models.Role, error)
 	Insert(role *models.Role) (*models.Role, error)
 	Update(role *models.Role) (*models.Role, error)
 	Delete(roleId string, isHardDelete bool) error
@@ -98,6 +99,14 @@ func (r *RoleRepositoryImpl) FindById(roleId string, isSoftDelete bool) (*models
 func (r *RoleRepositoryImpl) FindByName(roleName string) (*models.Role, error) {
 	var role *models.Role
 	if err := r.DB.Where("name = ?", roleName).First(&role).Error; err != nil {
+		return nil, HandleDatabaseError(err, "role")
+	}
+	return role, nil
+}
+
+func (r *RoleRepositoryImpl) FindByAlias(roleAlias string) (*models.Role, error) {
+	var role *models.Role
+	if err := r.DB.Where("alias = ?", roleAlias).First(&role).Error; err != nil {
 		return nil, HandleDatabaseError(err, "role")
 	}
 	return role, nil

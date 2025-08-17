@@ -2,6 +2,7 @@ package websockets
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
 
@@ -71,6 +72,7 @@ func Broadcast(event string, data interface{}) {
 
 func send(conn *ws.Conn, msg Message) {
 	b, err := json.Marshal(msg)
+	fmt.Println("send", msg)
 	if err != nil {
 		log.Println("marshal error:", err)
 		return

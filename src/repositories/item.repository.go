@@ -12,10 +12,12 @@ import (
 type ItemRepository interface {
 	FindAll() ([]models.Item, error)
 	FindAllPaginated(req *models.PaginationRequest) ([]models.Item, int64, error)
-	FindById(itemId string, isSoftDelete bool) (*models.Item, error)
+	FindById(itemId string, includeTrash bool) (*models.Item, error)
 	FindByName(itemName string) (*models.Item, error)
 	CountAllThisMonth() (int64, error)
 	CountAllLastMonth() (int64, error)
+	CountLowStockNow() (int64, error)
+	CountLowStockLastMonth() (int64, error)
 	Insert(item *models.Item) (*models.Item, error)
 	Update(item *models.Item) (*models.Item, error)
 	Delete(itemId string, isHardDelete bool) error
@@ -96,11 +98,11 @@ func (r *ItemRepositoryImpl) FindAllPaginated(req *models.PaginationRequest) ([]
 	return items, totalCount, nil
 }
 
-func (r *ItemRepositoryImpl) FindById(itemId string, isSoftDelete bool) (*models.Item, error) {
+func (r *ItemRepositoryImpl) FindById(itemId string, includeTrash bool) (*models.Item, error) {
 	var item *models.Item
 	db := r.DB
 
-	if !isSoftDelete {
+	if includeTrash {
 		db = db.Unscoped()
 	}
 
@@ -137,6 +139,19 @@ func (r *ItemRepositoryImpl) CountAllLastMonth() (int64, error) {
 		Where("DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW() - INTERVAL '1 month')").
 		Count(&count).Error
 	return count, err
+}
+
+func (r *ItemRepositoryImpl) CountLowStockNow() (int64, error) {
+	var count int64
+	err := r.DB.Model(&models.Item{}).
+		Where("deleted_at IS NULL").
+		Where("stock <= low_stock").
+		Count(&count).Error
+	return count, err
+}
+
+func (r *ItemRepositoryImpl) CountLowStockLastMonth() (int64, error) {
+	return r.CountLowStockNow()
 }
 
 func (r *ItemRepositoryImpl) Insert(item *models.Item) (*models.Item, error) {

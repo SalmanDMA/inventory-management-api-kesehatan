@@ -6,6 +6,7 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/SalmanDMA/inventory-app/backend/src/configs"
 	"github.com/SalmanDMA/inventory-app/backend/src/helpers"
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
@@ -46,6 +47,7 @@ func (service *ItemService) GetAllItems() ([]models.ResponseGetItem, error) {
 			Category:    item.Category,
 			Description: item.Description,
 			Stock:  item.Stock,
+			LowStock: item.LowStock,
 			ItemHistories: item.ItemHistories,
 			CreatedAt: 	item.CreatedAt,
 			UpdatedAt: 	item.UpdatedAt,
@@ -88,6 +90,7 @@ func (service *ItemService) GetAllItemsPaginated(req *models.PaginationRequest, 
 			Category:    item.Category,
 			Description: item.Description,
 			Stock:  item.Stock,
+			LowStock: item.LowStock,
 			ItemHistories: item.ItemHistories,
 			CreatedAt: 	item.CreatedAt,
 			UpdatedAt: 	item.UpdatedAt,
@@ -132,6 +135,7 @@ func (service *ItemService) GetItemByID(itemId string) (*models.ResponseGetItem,
 			Category:    item.Category,
 			Description: item.Description,
 			Stock:  					item.Stock,
+			LowStock: item.LowStock,
 			ItemHistories: item.ItemHistories,
 	}, nil
 }
@@ -149,109 +153,192 @@ func (service *ItemService) CreateItem(itemRequest *models.ItemCreateRequest, ct
 		Code:        itemRequest.Code,
 		Price:       itemRequest.Price,
 		Stock:       itemRequest.Stock,
+		LowStock:    itemRequest.LowStock,
 		CategoryID:  itemRequest.CategoryID,
 		Description: itemRequest.Description,
 	}
 
-	file, err := ctx.FormFile("image")
-	if err == nil {
-		uuidStr, err := helpers.SaveFile(ctx, file, "items")
-		if err != nil {
-			return nil, err
+	var imageUUIDStr string
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+			if imageUUIDStr != "" {
+				helpers.DeleteLocalFileImmediate(imageUUIDStr)
+			}
 		}
-		imageUUID, err := uuid.Parse(uuidStr)
+	}()
+
+	file, err := ctx.FormFile("image")
+	if err == nil && file != nil {
+		imageUUIDStr, err = helpers.SaveFile(ctx, file, "items")
 		if err != nil {
-			return nil, err
+			tx.Rollback()
+			return nil, fmt.Errorf("failed to save image: %w", err)
+		}
+
+		imageUUID, err := uuid.Parse(imageUUIDStr)
+		if err != nil {
+			tx.Rollback()
+			helpers.DeleteLocalFileImmediate(imageUUIDStr)
+			return nil, fmt.Errorf("invalid image UUID: %w", err)
 		}
 		newItem.ImageID = &imageUUID
 	}
 
-	item, err := service.ItemRepository.Insert(newItem)
+	result := tx.Create(newItem)
+	if result.Error != nil {
+		tx.Rollback()
+		if imageUUIDStr != "" {
+			helpers.DeleteLocalFileImmediate(imageUUIDStr)
+		}
+		return nil, fmt.Errorf("error creating item: %w", result.Error)
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		if imageUUIDStr != "" {
+			helpers.DeleteLocalFileImmediate(imageUUIDStr)
+		}
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	insertedItem, err := service.ItemRepository.FindById(newItem.ID.String(), false)
 	if err != nil {
-		return nil, err
+		log.Printf("Warning: Item created but failed to fetch created data: %v", err)
+		return newItem, nil
 	}
 
 	if _, err := service.ItemHistoryRepository.Insert(&models.ItemHistory{
 		ID:          uuid.New(),
-		ItemID:      item.ID,
+		ItemID:      insertedItem.ID,
 		ChangeType:  "create_price",
 		OldPrice:    0,
-		NewPrice:    item.Price,
-		CurrentPrice: item.Price,
+		NewPrice:    insertedItem.Price,
+		CurrentPrice: insertedItem.Price,
 		CreatedBy:   &userInfo.ID,
 		UpdatedBy:   &userInfo.ID,
-		Description: "Initial price set to " + strconv.Itoa(item.Price),
+		Description: "Initial price set to " + strconv.Itoa(insertedItem.Price),
 	}); err != nil {
 		return nil, err
 	}
 
 	if _, err := service.ItemHistoryRepository.Insert(&models.ItemHistory{
 		ID:          uuid.New(),
-		ItemID:      item.ID,
+		ItemID:      insertedItem.ID,
 		ChangeType:  "create_stock",
 		OldStock:    0,
-		NewStock:    item.Stock,
-		CurrentStock: item.Stock,
+		NewStock:    insertedItem.Stock,
+		CurrentStock: insertedItem.Stock,
 		CreatedBy:   &userInfo.ID,
 		UpdatedBy:   &userInfo.ID,
-		Description: "Initial stock set to " + strconv.Itoa(item.Stock),
+		Description: "Initial stock set to " + strconv.Itoa(insertedItem.Stock),
 	}); err != nil {
 		return nil, err
 	}
 
-	return item, nil
+	return insertedItem, nil
 }
 
-func (service *ItemService) UpdateItem(itemID string, itemUpdate *models.ItemUpdateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Item, error) {
-	itemExists, err := service.ItemRepository.FindById(itemID, false)
+func (service *ItemService) UpdateItem(itemRequest *models.ItemUpdateRequest, itemID string, ctx *fiber.Ctx, userInfo *models.User) (*models.Item, error) {
+	item, err := service.ItemRepository.FindById(itemID, false)
 	if err != nil {
 		return nil, err
 	}
-	if itemExists == nil {
+	if item == nil {
 		return nil, errors.New("item not found")
 	}
 
-	if itemUpdate.Name != "" {
-		itemExists.Name = itemUpdate.Name
+	if itemRequest.Name != "" {
+		item.Name = itemRequest.Name
 	}
-	if itemUpdate.Code != "" {
-		itemExists.Code = itemUpdate.Code
+	if itemRequest.Code != "" {
+		item.Code = itemRequest.Code
 	}
-	if itemUpdate.CategoryID != uuid.Nil {
-		itemExists.CategoryID = itemUpdate.CategoryID
+	if itemRequest.LowStock != 0 {
+		item.LowStock = itemRequest.LowStock
 	}
-	if itemUpdate.Description != "" {
-		itemExists.Description = itemUpdate.Description
+	if itemRequest.CategoryID != uuid.Nil {
+		item.CategoryID = itemRequest.CategoryID
+	}
+	if itemRequest.Description != "" {
+		item.Description = itemRequest.Description
 	}
 
 	file, err := ctx.FormFile("image")
 	if err == nil && file != nil {
-		imageIDStr, err := helpers.SaveFile(ctx, file, "items")
+		oldImageID := item.ImageID
+		var newImageUUIDStr string
+		var newImageID uuid.UUID
+
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
+		}
+
+		defer func() {
+			if r := recover(); r != nil {
+				tx.Rollback()
+				if newImageUUIDStr != "" {
+					helpers.DeleteLocalFileImmediate(newImageUUIDStr)
+				}
+			}
+		}()
+
+		newImageUUIDStr, err := helpers.SaveFile(ctx, file, "items")
 		if err != nil {
+			tx.Rollback()
 			return nil, fmt.Errorf("failed to save image: %w", err)
 		}
 
-		newImageID, err := uuid.Parse(imageIDStr)
+		newImageID, err = uuid.Parse(newImageUUIDStr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid image ID: %w", err)
+			tx.Rollback()
+			helpers.DeleteLocalFileImmediate(newImageUUIDStr)
+			return nil, fmt.Errorf("invalid image UUID: %w", err)
 		}
 
-		oldImageID := itemExists.ImageID
-		itemExists.ImageID = &newImageID
+		item.Image = nil
+		item.ImageID = &newImageID
+		result := tx.Model(item).Select("*").Updates(item)
+		if result.Error != nil {
+			tx.Rollback()
+			helpers.DeleteLocalFileImmediate(newImageUUIDStr)
+			return nil, fmt.Errorf("error updating item with image: %w", result.Error)
+		}
 
-		updatedUser, err := service.ItemRepository.Update(itemExists)
+		if result.RowsAffected == 0 {
+			tx.Rollback()
+			helpers.DeleteLocalFileImmediate(newImageUUIDStr)
+			return nil, errors.New("no rows affected, item may not exist")
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			helpers.DeleteLocalFileImmediate(newImageUUIDStr)
+			return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		}
+
+		updatedItem, err := service.ItemRepository.FindById(item.ID.String(), false)
 		if err != nil {
-			return nil, fmt.Errorf("error updating itemExists with image: %w", err)
+			log.Printf("Warning: Item updated but failed to fetch updated data: %v", err)
+			return item, nil
 		}
 
 		if oldImageID != nil {
-			service.UploadRepository.Delete(oldImageID.String(), false)
+			go func() {
+				if err := helpers.DeleteLocalFileImmediate(oldImageID.String()); err != nil {
+					log.Printf("Warning: Failed to delete old image file %s: %v", oldImageID.String(), err)
+				}
+			}()
 		}
 
-		return updatedUser, nil
+		return updatedItem, nil
 	}
 
-	updateItem, err := service.ItemRepository.Update(itemExists)
+	updateItem, err := service.ItemRepository.Update(item)
 	if err != nil {
 		return nil, err
 	}
@@ -261,32 +348,63 @@ func (service *ItemService) UpdateItem(itemID string, itemUpdate *models.ItemUpd
 
 func (service *ItemService) DeleteItems(itemRequest *models.ItemIsHardDeleteRequest, ctx *fiber.Ctx, userInfo *models.User) error {
 	for _, itemId := range itemRequest.IDs {
-		item, err := service.ItemRepository.FindById(itemId.String(), false)
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			log.Printf("Failed to begin transaction for item %v: %v\n", itemId, tx.Error)
+			return errors.New("error beginning transaction")
+		}
+
+		item, err := service.ItemRepository.FindById(itemId.String(), true)
 		if err != nil {
+			tx.Rollback()
 			if err == repositories.ErrItemNotFound {
 				log.Printf("Item not found: %v\n", itemId)
 				continue
 			}
 			log.Printf("Error finding item %v: %v\n", itemId, err)
-			return errors.New("error finding useitemr")
+			return errors.New("error finding item")
 		}
 
 		if itemRequest.IsHardDelete == "hardDelete" {
 			if item.ImageID != nil && item.ImageID.String() != "" {
-				if err := service.UploadRepository.Delete(item.ImageID.String(), false); err != nil {
-					log.Printf("Error deleting image file for item %v: %v\n", itemId, err)
-					return errors.New("error deleting image file")
+				if err := tx.Unscoped().Delete(&models.Item{}, "id = ?", itemId).Error; err != nil {
+					tx.Rollback()
+					log.Printf("Error hard deleting item %v: %v\n", itemId, err)
+					return errors.New("error hard deleting item")
+				}
+
+				if err := tx.Commit().Error; err != nil {
+					log.Printf("Error committing hard delete for item %v: %v\n", itemId, err)
+					return errors.New("error committing hard delete")
+				}
+
+				go func(imageID string) {
+					if err := helpers.DeleteLocalFileImmediate(imageID); err != nil {
+						log.Printf("Warning: Failed to delete image file %s: %v", imageID, err)
+					}
+				}(item.ImageID.String())
+			} else {
+				if err := tx.Unscoped().Delete(&models.Item{}, "id = ?", itemId).Error; err != nil {
+					tx.Rollback()
+					log.Printf("Error hard deleting item %v: %v\n", itemId, err)
+					return errors.New("error hard deleting item")
+				}
+
+				if err := tx.Commit().Error; err != nil {
+					log.Printf("Error committing hard delete for item %v: %v\n", itemId, err)
+					return errors.New("error committing hard delete")
 				}
 			}
-
-			if err := service.ItemRepository.Delete(itemId.String(), true); err != nil {
-				log.Printf("Error hard deleting item %v: %v\n", itemId, err)
-				return errors.New("error hard deleting item")
-			}
 		} else {
-			if err := service.ItemRepository.Delete(itemId.String(), false); err != nil {
+			if err := tx.Delete(&models.Item{}, "id = ?", itemId).Error; err != nil {
+				tx.Rollback()
 				log.Printf("Error soft deleting item %v: %v\n", itemId, err)
 				return errors.New("error soft deleting item")
+			}
+
+			if err := tx.Commit().Error; err != nil {
+				log.Printf("Error committing soft delete for item %v: %v\n", itemId, err)
+				return errors.New("error committing soft delete")
 			}
 		}
 	}
@@ -294,20 +412,38 @@ func (service *ItemService) DeleteItems(itemRequest *models.ItemIsHardDeleteRequ
 	return nil
 }
 
-func (service *ItemService) RestoreItems(item *models.ItemRestoreRequest, ctx *fiber.Ctx, userInfo *models.User) ([]models.Item, error) {
+func (service *ItemService) RestoreItems(itemRequest *models.ItemRestoreRequest, ctx *fiber.Ctx, userInfo *models.User) ([]models.Item, error) {
 	var restoredItems []models.Item
 
-	for _, itemId := range item.IDs {
-		item := &models.Item{ID: itemId}
+	for _, itemId := range itemRequest.IDs {
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			log.Printf("Failed to begin transaction for item restore %v: %v\n", itemId, tx.Error)
+			return nil, errors.New("error beginning transaction")
+		}
 
-		restoredItem, err := service.ItemRepository.Restore(item, itemId.String())
-		if err != nil {
-			if err == repositories.ErrItemNotFound {
-				log.Printf("Item not found: %v\n", itemId)
-				continue
-			}
-			log.Printf("Error restoring item %v: %v\n", itemId, err)
+		result := tx.Model(&models.Item{}).Unscoped().Where("id = ?", itemId).Update("deleted_at", nil)
+		if result.Error != nil {
+			tx.Rollback()
+			log.Printf("Error restoring item %v: %v\n", itemId, result.Error)
 			return nil, errors.New("error restoring item")
+		}
+
+		if result.RowsAffected == 0 {
+			tx.Rollback()
+			log.Printf("Item not found for restore: %v\n", itemId)
+			continue
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			log.Printf("Error committing item restore %v: %v\n", itemId, err)
+			return nil, errors.New("error committing item restore")
+		}
+
+		restoredItem, err := service.ItemRepository.FindById(itemId.String(), true)
+		if err != nil {
+			log.Printf("Error fetching restored item %v: %v\n", itemId, err)
+			continue
 		}
 
 		restoredItems = append(restoredItems, *restoredItem)

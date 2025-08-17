@@ -14,12 +14,13 @@ type Item struct {
 	CategoryID  uuid.UUID      `gorm:"type:uuid" json:"category_id"`
 	Price       int            `gorm:"not null" json:"price"`
 	Stock       int            `gorm:"not null" json:"stock"`
+	LowStock    int            `gorm:"not null" json:"low_stock"`
 	ImageID     *uuid.UUID     `gorm:"type:uuid" json:"image_id,omitempty"`
 	Description string         `json:"description"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
-	Image       *Upload        `gorm:"foreignKey:ImageID" json:"image,omitempty"`
+	Image       *Upload        `gorm:"foreignKey:ImageID;constraint:onUpdate:CASCADE,onDelete:SET NULL;" json:"image,omitempty"`
 	Category    Category       `gorm:"foreignKey:CategoryID" json:"category"`
 	ItemHistories []ItemHistory `gorm:"foreignKey:ItemID" json:"item_histories,omitempty"`
 }
@@ -30,6 +31,7 @@ type ResponseGetItem struct {
 	Code        string         `json:"code"`
 	Price       int            `json:"price"`
 	Stock       int            `json:"stock"`
+	LowStock    int            `json:"low_stock"`
 	ImageID     *uuid.UUID     `json:"image_id,omitempty"`
 	CategoryID  uuid.UUID      `json:"category_id"`
 	Description string         `json:"description"`
@@ -46,6 +48,7 @@ type ItemCreateRequest struct {
 	Code        string         `json:"code" xml:"code" form:"code" validate:"required"`
 	Price       int 											`json:"price" xml:"price" form:"price" validate:"required"`
 	Stock       int 											`json:"stock" xml:"stock" form:"stock" validate:"required"`
+	LowStock    int 											`json:"low_stock" xml:"low_stock" form:"low_stock" validate:"required"`
 	CategoryID  uuid.UUID      `json:"category_id" xml:"category_id" form:"category_id" validate:"required"`
 	Description string         `json:"description" xml:"description" form:"description"`
 }
@@ -55,6 +58,7 @@ type ItemUpdateRequest struct {
 	Code        string         `json:"code" xml:"code" form:"code"`
 	Price       int 			`json:"price" xml:"price" form:"price"`
 	Stock       int 			`json:"stock" xml:"stock" form:"stock"`
+	LowStock    int 			`json:"low_stock" xml:"low_stock" form:"low_stock"`
 	CategoryID  uuid.UUID      `json:"category_id" xml:"category_id" form:"category_id"`
 	Description string         `json:"description" xml:"description" form:"description"`
 }

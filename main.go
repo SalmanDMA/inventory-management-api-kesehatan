@@ -22,6 +22,9 @@ func main() {
 		}
 	}
 
+	// Minio connection
+	configs.InitMinio()
+
 	// Database connection and migration
 	configs.ConnectDB()
 	migrations.RunMigration()

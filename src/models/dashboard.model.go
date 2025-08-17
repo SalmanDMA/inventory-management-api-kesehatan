@@ -13,13 +13,3 @@ type DashboardSummary struct {
 	ActiveOrders  MetricWithChange[int64]   `json:"active_orders"`
 	TotalValue    MetricWithChange[float64] `json:"total_value"`
 }
-
-type InventoryOverview struct {
-	Category   string `json:"category"`
-	TotalStock int    `json:"total_stock"`
-}
-
-type MonthlyTrend struct {
-	Month         string `json:"month"`
-	TotalQuantity int    `json:"total_quantity"`
-}

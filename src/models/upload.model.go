@@ -17,6 +17,7 @@ type Upload struct {
 	Mime           string         `json:"mime"`
 	Extension      string         `json:"extension"`
 	Size           int64          `json:"size"`
+	Bucket         string 									`json:"bucket"`
 	CreatedAt      time.Time      `json:"created_at"`
 	UpdatedAt      time.Time      `json:"updated_at"`
 	DeletedAt      gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
@@ -32,6 +33,7 @@ type ResponseGetUpload struct {
 	Mime        string `json:"mime"`
 	Extension  	string `json:"extension"`
 	Size        int64  `json:"size"`
+	Bucket      string  `json:"bucket"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	DeletedAt    gorm.DeletedAt `json:"deleted_at"`
