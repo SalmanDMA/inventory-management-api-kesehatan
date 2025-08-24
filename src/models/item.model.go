@@ -8,21 +8,26 @@ import (
 )
 
 type Item struct {
-	ID          uuid.UUID      `gorm:"type:uuid;primary_key" json:"id"`
-	Name        string         `gorm:"not null" json:"name"`
-	Code        string         `gorm:"uniqueIndex;not null" json:"code"`
-	CategoryID  uuid.UUID      `gorm:"type:uuid" json:"category_id"`
-	Price       int            `gorm:"not null" json:"price"`
-	Stock       int            `gorm:"not null" json:"stock"`
-	LowStock    int            `gorm:"not null" json:"low_stock"`
-	ImageID     *uuid.UUID     `gorm:"type:uuid" json:"image_id,omitempty"`
-	Description string         `json:"description"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
-	Image       *Upload        `gorm:"foreignKey:ImageID;constraint:onUpdate:CASCADE,onDelete:SET NULL;" json:"image,omitempty"`
-	Category    Category       `gorm:"foreignKey:CategoryID" json:"category"`
-	ItemHistories []ItemHistory `gorm:"foreignKey:ItemID" json:"item_histories,omitempty"`
+		ID         uuid.UUID      `gorm:"type:uuid;primary_key" json:"id"`
+		Name       string         `gorm:"not null" json:"name"`
+		Code       string         `gorm:"uniqueIndex;not null" json:"code"`
+		CategoryID uuid.UUID      `gorm:"type:uuid" json:"category_id"`
+		UoMID      uuid.UUID      `gorm:"column:uom_id;type:uuid;not null" json:"uom_id"`
+		Price      int            `gorm:"not null" json:"price"`
+		Stock      int            `gorm:"not null" json:"stock"`
+		LowStock   int            `gorm:"not null" json:"low_stock"`
+		ImageID    *uuid.UUID     `gorm:"type:uuid" json:"image_id,omitempty"`
+		Description string        `json:"description"`
+		Batch       int           `gorm:"default:0" json:"batch"`
+		ExpiredAt  time.Time     `json:"expired_at"`
+		CreatedAt  time.Time      `json:"created_at"`
+		UpdatedAt  time.Time      `json:"updated_at"`
+		DeletedAt  gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+
+		UoM           UoM           `gorm:"foreignKey:UoMID" json:"uom"`
+		Image         *Upload       `gorm:"foreignKey:ImageID;constraint:onUpdate:CASCADE,onDelete:SET NULL;" json:"image,omitempty"`
+		Category      Category      `gorm:"foreignKey:CategoryID" json:"category"`
+		ItemHistories []ItemHistory `gorm:"foreignKey:ItemID" json:"item_histories,omitempty"`
 }
 
 type ResponseGetItem struct {
@@ -34,10 +39,16 @@ type ResponseGetItem struct {
 	LowStock    int            `json:"low_stock"`
 	ImageID     *uuid.UUID     `json:"image_id,omitempty"`
 	CategoryID  uuid.UUID      `json:"category_id"`
+	UoMID       uuid.UUID      `json:"uom_id"`
 	Description string         `json:"description"`
+	Batch       int            `json:"batch"`
+	ExpiredAt   time.Time      `json:"expired_at"`
+
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+
+	UoM         UoM            `json:"uom"`
 	Image       *Upload        `json:"image,omitempty"`
 	Category    Category       `json:"category"`
 	ItemHistories []ItemHistory `json:"item_histories,omitempty"`
@@ -50,7 +61,10 @@ type ItemCreateRequest struct {
 	Stock       int 											`json:"stock" xml:"stock" form:"stock" validate:"required"`
 	LowStock    int 											`json:"low_stock" xml:"low_stock" form:"low_stock" validate:"required"`
 	CategoryID  uuid.UUID      `json:"category_id" xml:"category_id" form:"category_id" validate:"required"`
+	UoMID       uuid.UUID      `json:"uom_id" xml:"uom_id" form:"uom_id" validate:"required"`
 	Description string         `json:"description" xml:"description" form:"description"`
+	Batch       int            `json:"batch" xml:"batch" form:"batch" validate:"required"`
+	ExpiredAt   time.Time      `json:"expired_at" xml:"expired_at" form:"expired_at" validate:"required"`
 }
 
 type ItemUpdateRequest struct {
@@ -60,7 +74,10 @@ type ItemUpdateRequest struct {
 	Stock       int 			`json:"stock" xml:"stock" form:"stock"`
 	LowStock    int 			`json:"low_stock" xml:"low_stock" form:"low_stock"`
 	CategoryID  uuid.UUID      `json:"category_id" xml:"category_id" form:"category_id"`
+	UoMID       uuid.UUID      `json:"uom_id" xml:"uom_id" form:"uom_id"`
 	Description string         `json:"description" xml:"description" form:"description"`
+	Batch       int            `json:"batch" xml:"batch" form:"batch"`
+	ExpiredAt   time.Time      `json:"expired_at" xml:"expired_at" form:"expired_at"`
 }
 
 type ItemIsHardDeleteRequest struct {

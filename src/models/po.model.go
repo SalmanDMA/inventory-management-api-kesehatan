@@ -14,13 +14,14 @@ type PurchaseOrder struct {
 	PODate            time.Time      `gorm:"not null" json:"po_date"`
 	EstimatedArrival  *time.Time     `json:"estimated_arrival"`
 	TermOfPayment     string         `gorm:"not null" json:"term_of_payment"` // Full, DP, Tempo
-	POStatus          string         `gorm:"not null;default:'Draft'" json:"po_status"` // Draft, Ordered, Received, Returned, Closed
+	POStatus          string         `gorm:"not null;default:'Draft'" json:"po_status"` // Draft, Ordered, Received, Partial, Returned, Closed
 	PaymentStatus     string         `gorm:"not null;default:'Unpaid'" json:"payment_status"` // Unpaid, Partial, Paid
 	TotalAmount       int            `gorm:"not null" json:"total_amount"`
 	PaidAmount        int            `gorm:"default:0" json:"paid_amount"`
 	DPAmount          int            `gorm:"default:0" json:"dp_amount"`
 	DueDate           *time.Time     `json:"due_date"`
 	Notes             string         `json:"notes"`
+	Tax 														float32            `gorm:"default:0" json:"tax"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
 	DeletedAt         gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
@@ -34,18 +35,21 @@ type PurchaseOrderItem struct {
 	ID               uuid.UUID      `gorm:"type:uuid;primary_key" json:"id"`
 	PurchaseOrderID  uuid.UUID      `gorm:"type:uuid;not null" json:"purchase_order_id"`
 	ItemID           uuid.UUID      `gorm:"type:uuid;not null" json:"item_id"`
-	Quantity         int            `gorm:"not null" json:"quantity"`
-	UnitPrice        int            `gorm:"not null" json:"unit_price"`
+	UoMID      uuid.UUID      						`gorm:"column:uom_id;type:uuid;not null" json:"uom_id"`
+	Quantity         int            `gorm:"not null" json:"quantity"`           
+	UnitPrice        int            `gorm:"not null" json:"unit_price"`         
 	TotalPrice       int            `gorm:"not null" json:"total_price"`
 	ReceivedQuantity int            `gorm:"default:0" json:"received_quantity"`
 	ReturnedQuantity int            `gorm:"default:0" json:"returned_quantity"`
 	Status           string         `gorm:"not null;default:'Ordered'" json:"status"` // Ordered, Received, Returned, Partial
+
 	CreatedAt        time.Time      `json:"created_at"`
 	UpdatedAt        time.Time      `json:"updated_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
-	
+
 	PurchaseOrder    PurchaseOrder  `gorm:"foreignKey:PurchaseOrderID" json:"purchase_order"`
 	Item             Item           `gorm:"foreignKey:ItemID" json:"item"`
+	UoM              UoM            `gorm:"foreignKey:UoMID" json:"uom"`
 }
 
 type ResponseGetPurchaseOrder struct {
@@ -62,9 +66,12 @@ type ResponseGetPurchaseOrder struct {
 	DPAmount          int                     `json:"dp_amount"`
 	DueDate           *time.Time              `json:"due_date"`
 	Notes             string                  `json:"notes"`
+ Tax 													float32                     	`json:"tax"`
+
 	CreatedAt         time.Time               `json:"created_at"`
 	UpdatedAt         time.Time               `json:"updated_at"`
 	DeletedAt         gorm.DeletedAt          `json:"deleted_at,omitempty"`
+	
 	Supplier          Supplier     `json:"supplier"`
 	PurchaseOrderItems []PurchaseOrderItem `json:"purchase_order_items,omitempty"`
 	Payments          []Payment    `json:"payments,omitempty"`
@@ -101,6 +108,7 @@ type PurchaseOrderCreateRequest struct {
 	DPAmount         int                        `json:"dp_amount"`
 	DueDate          *time.Time                 `json:"due_date"`
 	Notes            string                     `json:"notes"`
+	Tax 													float32                     `json:"tax"`
 	Items            []PurchaseOrderItemRequest `json:"items" validate:"required,min=1,dive"`
 }
 
@@ -112,6 +120,7 @@ type PurchaseOrderUpdateRequest struct {
 	DPAmount         int                        `json:"dp_amount"`
 	DueDate          *time.Time                 `json:"due_date"`
 	Notes            string                     `json:"notes"`
+	Tax 													float32                        `json:"tax"`
 	Items            []PurchaseOrderItemRequest `json:"items" validate:"omitempty,min=1,dive"`
 }
 

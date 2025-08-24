@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 
+	"github.com/SalmanDMA/inventory-app/backend/src/configs"
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
 	"github.com/google/uuid"
@@ -18,122 +19,160 @@ func NewUploadService(uploadRepo repositories.UploadRepository) *UploadService {
 	}
 }
 
-func (service *UploadService) GetAllUploads() ([]models.ResponseGetUpload, error) {
-	uploads, err := service.UploadRepository.FindAll()
+func (s *UploadService) GetAllUploads() ([]models.ResponseGetUpload, error) {
+	uploads, err := s.UploadRepository.FindAll(nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var uploadsResponse []models.ResponseGetUpload
-	for _, upload := range uploads {
-		uploadsResponse = append(uploadsResponse, models.ResponseGetUpload{
-			ID:          upload.ID,
-		 Filename:    upload.Filename,
-			FilenameOrigin: upload.FilenameOrigin,
-			Category: upload.Category,
-			Path: upload.Path,
-			Type: upload.Type,
-			Mime: upload.Mime,
-			Extension: upload.Extension,
-			Size: upload.Size,
-			CreatedAt: upload.CreatedAt,
-			UpdatedAt: upload.UpdatedAt,
-			DeletedAt: upload.DeletedAt,
+	out := make([]models.ResponseGetUpload, 0, len(uploads))
+	for _, u := range uploads {
+		out = append(out, models.ResponseGetUpload{
+			ID:             u.ID,
+			Filename:       u.Filename,
+			FilenameOrigin: u.FilenameOrigin,
+			Category:       u.Category,
+			Path:           u.Path,
+			Type:           u.Type,
+			Mime:           u.Mime,
+			Extension:      u.Extension,
+			Size:           u.Size,
+			CreatedAt:      u.CreatedAt,
+			UpdatedAt:      u.UpdatedAt,
+			DeletedAt:      u.DeletedAt,
 		})
 	}
-
-	return uploadsResponse, nil
+	return out, nil
 }
 
-func (service *UploadService) CreateUpload(uploadRequest *models.UploadCreateRequest) ( *models.Upload, error) {
+func (s *UploadService) CreateUpload(in *models.UploadCreateRequest) (*models.Upload, error) {
 	newUpload := &models.Upload{
-		ID: 									uuid.New(),
-		Filename:    uploadRequest.Filename,
-		FilenameOrigin: uploadRequest.FilenameOrigin,
-		Category: uploadRequest.Category,
-		Path: uploadRequest.Path,
-		Type: uploadRequest.Type,
-		Mime: uploadRequest.Mime,
-		Extension: uploadRequest.Extension,
-		Size: uploadRequest.Size,
+		ID:             uuid.New(),
+		Filename:       in.Filename,
+		FilenameOrigin: in.FilenameOrigin,
+		Category:       in.Category,
+		Path:           in.Path,
+		Type:           in.Type,
+		Mime:           in.Mime,
+		Extension:      in.Extension,
+		Size:           in.Size,
 	}
 
-	upload, err := service.UploadRepository.Insert(newUpload)
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
 
+	created, err := s.UploadRepository.Insert(tx, newUpload)
 	if err != nil {
+		tx.Rollback()
 		return nil, err
 	}
 
-	return upload, nil
+	if err := tx.Commit().Error; err != nil {
+		return nil, err
+	}
+
+	// ambil ulang (kalau repo melakukan preload dsb.)
+	out, err := s.UploadRepository.FindById(nil, created.ID.String(), true)
+	if err != nil {
+		// kalau gagal fetch, setidaknya kembalikan hasil create
+		return created, nil
+	}
+	return out, nil
 }
 
-func (service *UploadService) UpdateUpload(uploadID string, uploadUpdate *models.UploadUpdateRequest) (*models.Upload, error) {
-	uploadExists, err := service.UploadRepository.FindById(uploadID, true)
+func (s *UploadService) UpdateUpload(uploadID string, in *models.UploadUpdateRequest) (*models.Upload, error) {
+	// find dulu (di luar tx boleh, atau di dalam juga boleh; di sini pakai luar untuk kesederhanaan)
+	exists, err := s.UploadRepository.FindById(nil, uploadID, true)
 	if err != nil {
 		return nil, err
 	}
-	if uploadExists == nil {
+	if exists == nil {
 		return nil, errors.New("upload not found")
 	}
 
-	if uploadUpdate.Filename != "" {
-		uploadExists.Filename = uploadUpdate.Filename
+	// map perubahan
+	if in.Filename != "" {
+		exists.Filename = in.Filename
+	}
+	if in.FilenameOrigin != "" {
+		exists.FilenameOrigin = in.FilenameOrigin
+	}
+	if in.Category != "" {
+		exists.Category = in.Category
+	}
+	if in.Path != "" {
+		exists.Path = in.Path
+	}
+	if in.Type != "" {
+		exists.Type = in.Type
+	}
+	if in.Mime != "" {
+		exists.Mime = in.Mime
+	}
+	if in.Extension != "" {
+		exists.Extension = in.Extension
+	}
+	if in.Size != 0 {
+		exists.Size = in.Size
 	}
 
-	if uploadUpdate.FilenameOrigin != "" {
-		uploadExists.FilenameOrigin = uploadUpdate.FilenameOrigin
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, tx.Error
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
 
-	if uploadUpdate.Category != "" {
-		uploadExists.Category = uploadUpdate.Category
-	}
-
-	if uploadUpdate.Path != "" {
-		uploadExists.Path = uploadUpdate.Path
-	}
-
-	if uploadUpdate.Type != "" {
-		uploadExists.Type = uploadUpdate.Type
-	}
-
-	if uploadUpdate.Mime != "" {
-		uploadExists.Mime = uploadUpdate.Mime
-	}
-
-	if uploadUpdate.Extension != "" {
-		uploadExists.Extension = uploadUpdate.Extension
-	}
-
-	if uploadUpdate.Size != 0 {
-		uploadExists.Size = uploadUpdate.Size
-	}
-
-	updateUpload , err := service.UploadRepository.Update(uploadExists)
+	updated, err := s.UploadRepository.Update(tx, exists)
 	if err != nil {
+		tx.Rollback()
 		return nil, err
 	}
 
-	return updateUpload, nil
+	if err := tx.Commit().Error; err != nil {
+		return nil, err
+	}
+
+	out, err := s.UploadRepository.FindById(nil, updated.ID.String(), true)
+	if err != nil {
+		return updated, nil
+	}
+	return out, nil
 }
 
-func (service *UploadService) DeleteUpload(uploadID string, isHardDelete bool) error {
-	uploadExists, err := service.UploadRepository.FindById(uploadID, true)
+func (s *UploadService) DeleteUpload(uploadID string, isHardDelete bool) error {
+	exists, err := s.UploadRepository.FindById(nil, uploadID, true)
 	if err != nil {
 		return err
 	}
-	if uploadExists == nil {
+	if exists == nil {
 		return errors.New("upload not found")
 	}
 
-	if isHardDelete {
-		if err := service.UploadRepository.Delete(uploadID, true); err != nil {
-			return err
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
 		}
-	} else {
-		if err := service.UploadRepository.Delete(uploadID, false); err != nil {
-			return err
-		}
+	}()
+
+	if err := s.UploadRepository.Delete(tx, uploadID, isHardDelete); err != nil {
+		tx.Rollback()
+		return err
 	}
 
-	return nil
+	return tx.Commit().Error
 }

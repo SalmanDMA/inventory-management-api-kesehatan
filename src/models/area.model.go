@@ -19,7 +19,7 @@ type Area struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 
-	Facilities []Facility `gorm:"foreignKey:AreaID;references:ID" json:"facilities,omitempty"`
+	Customers []Customer `gorm:"foreignKey:AreaID;references:ID" json:"customers,omitempty"`
 }
 
 type ResponseGetArea struct {

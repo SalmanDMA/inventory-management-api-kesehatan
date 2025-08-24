@@ -31,10 +31,11 @@ func GetAllSalesOrders(ctx *fiber.Ctx) error {
 
 	soRepo := repositories.NewSalesOrderRepository(configs.DB)
 	spRepo := repositories.NewSalesPersonRepository(configs.DB)
-	facilityRepo := repositories.NewFacilityRepository(configs.DB)
+	customerRepo := repositories.NewCustomerRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	soService := services.NewSalesOrderService(soRepo, spRepo, facilityRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	soService := services.NewSalesOrderService(soRepo, spRepo, customerRepo, itemRepo, paymentRepo, itemHistoryRepo)
 
 	orders, err := soService.GetAllSalesOrders()
 	if err != nil {
@@ -79,10 +80,11 @@ func GetAllSalesOrdersPaginated(ctx *fiber.Ctx) error {
 
 	soRepo := repositories.NewSalesOrderRepository(configs.DB)
 	spRepo := repositories.NewSalesPersonRepository(configs.DB)
-	facilityRepo := repositories.NewFacilityRepository(configs.DB)
+	customerRepo := repositories.NewCustomerRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	soService := services.NewSalesOrderService(soRepo, spRepo, facilityRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	soService := services.NewSalesOrderService(soRepo, spRepo, customerRepo, itemRepo, paymentRepo, itemHistoryRepo)
 
 	result, err := soService.GetAllSalesOrdersPaginated(paginationReq, userInfo)
 	if err != nil {
@@ -113,10 +115,11 @@ func GetSalesOrderByID(ctx *fiber.Ctx) error {
 	soId := ctx.Params("id")
 	soRepo := repositories.NewSalesOrderRepository(configs.DB)
 	spRepo := repositories.NewSalesPersonRepository(configs.DB)
-	facilityRepo := repositories.NewFacilityRepository(configs.DB)
+	customerRepo := repositories.NewCustomerRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	soService := services.NewSalesOrderService(soRepo, spRepo, facilityRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	soService := services.NewSalesOrderService(soRepo, spRepo, customerRepo, itemRepo, paymentRepo, itemHistoryRepo)
 
 	order, err := soService.GetSalesOrderByID(soId)
 	if err != nil {
@@ -144,10 +147,11 @@ func GenerateDocumentDeliveryOrder(ctx *fiber.Ctx) error {
 
 	soRepo := repositories.NewSalesOrderRepository(configs.DB)
 	spRepo := repositories.NewSalesPersonRepository(configs.DB)
-	facilityRepo := repositories.NewFacilityRepository(configs.DB)
+	customerRepo := repositories.NewCustomerRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	soService := services.NewSalesOrderService(soRepo, spRepo, facilityRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	soService := services.NewSalesOrderService(soRepo, spRepo, customerRepo, itemRepo, paymentRepo, itemHistoryRepo)
 
 	filename, pdfBytes, err := soService.GenerateDocumentDeliveryOrder(soId)
 	if err != nil {
@@ -177,10 +181,11 @@ func GenerateInvoice(ctx *fiber.Ctx) error {
 
 	soRepo := repositories.NewSalesOrderRepository(configs.DB)
 	spRepo := repositories.NewSalesPersonRepository(configs.DB)
-	facilityRepo := repositories.NewFacilityRepository(configs.DB)
+	customerRepo := repositories.NewCustomerRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	soService := services.NewSalesOrderService(soRepo, spRepo, facilityRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	soService := services.NewSalesOrderService(soRepo, spRepo, customerRepo, itemRepo, paymentRepo, itemHistoryRepo)
 
 	filename, pdfBytes, err := soService.GenerateInvoice(soId)
 	if err != nil {
@@ -210,10 +215,11 @@ func GenerateReceipt(ctx *fiber.Ctx) error {
 
 	soRepo := repositories.NewSalesOrderRepository(configs.DB)
 	spRepo := repositories.NewSalesPersonRepository(configs.DB)
-	facilityRepo := repositories.NewFacilityRepository(configs.DB)
+	customerRepo := repositories.NewCustomerRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	soService := services.NewSalesOrderService(soRepo, spRepo, facilityRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	soService := services.NewSalesOrderService(soRepo, spRepo, customerRepo, itemRepo, paymentRepo, itemHistoryRepo)
 
 	filename, pdfBytes, err := soService.GenerateReceipt(soId)
 	if err != nil {
@@ -256,10 +262,11 @@ func CreateSalesOrder(ctx *fiber.Ctx) error {
 
 	soRepo := repositories.NewSalesOrderRepository(configs.DB)
 	spRepo := repositories.NewSalesPersonRepository(configs.DB)
-	facilityRepo := repositories.NewFacilityRepository(configs.DB)
+	customerRepo := repositories.NewCustomerRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	soService := services.NewSalesOrderService(soRepo, spRepo, facilityRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	soService := services.NewSalesOrderService(soRepo, spRepo, customerRepo, itemRepo, paymentRepo, itemHistoryRepo)
 
 	order, err := soService.CreateSalesOrder(soRequest, userInfo)
 	if err != nil {
@@ -302,11 +309,11 @@ func UpdateSalesOrder(ctx *fiber.Ctx) error {
 	soId := ctx.Params("id")
 	soRepo := repositories.NewSalesOrderRepository(configs.DB)
 	spRepo := repositories.NewSalesPersonRepository(configs.DB)
-	facilityRepo := repositories.NewFacilityRepository(configs.DB)
+	customerRepo := repositories.NewCustomerRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	soService := services.NewSalesOrderService(soRepo, spRepo, facilityRepo, itemRepo, paymentRepo)
-
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	soService := services.NewSalesOrderService(soRepo, spRepo, customerRepo, itemRepo, paymentRepo, itemHistoryRepo)
 	order, err := soService.UpdateSalesOrder(soId, soRequest, userInfo)
 	if err != nil {
 		return helpers.Response(ctx, fiber.StatusBadRequest, "Failed to update sales order", err.Error())
@@ -348,10 +355,11 @@ func UpdateSalesOrderStatus(ctx *fiber.Ctx) error {
 	soId := ctx.Params("id")
 	soRepo := repositories.NewSalesOrderRepository(configs.DB)
 	spRepo := repositories.NewSalesPersonRepository(configs.DB)
-	facilityRepo := repositories.NewFacilityRepository(configs.DB)
+	customerRepo := repositories.NewCustomerRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	soService := services.NewSalesOrderService(soRepo, spRepo, facilityRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	soService := services.NewSalesOrderService(soRepo, spRepo, customerRepo, itemRepo, paymentRepo, itemHistoryRepo)
 
 	err := soService.UpdateSalesOrderStatus(soId, statusRequest, userInfo)
 	if err != nil {
@@ -393,10 +401,11 @@ func DeleteSalesOrders(ctx *fiber.Ctx) error {
 
 	soRepo := repositories.NewSalesOrderRepository(configs.DB)
 	spRepo := repositories.NewSalesPersonRepository(configs.DB)
-	facilityRepo := repositories.NewFacilityRepository(configs.DB)
+	customerRepo := repositories.NewCustomerRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	soService := services.NewSalesOrderService(soRepo, spRepo, facilityRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	soService := services.NewSalesOrderService(soRepo, spRepo, customerRepo, itemRepo, paymentRepo, itemHistoryRepo)
 
 	err := soService.DeleteSalesOrders(deleteRequest, userInfo)
 	if err != nil {
@@ -438,10 +447,11 @@ func RestoreSalesOrders(ctx *fiber.Ctx) error {
 
 	soRepo := repositories.NewSalesOrderRepository(configs.DB)
 	spRepo := repositories.NewSalesPersonRepository(configs.DB)
-	facilityRepo := repositories.NewFacilityRepository(configs.DB)
+	customerRepo := repositories.NewCustomerRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	soService := services.NewSalesOrderService(soRepo, spRepo, facilityRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	soService := services.NewSalesOrderService(soRepo, spRepo, customerRepo, itemRepo, paymentRepo, itemHistoryRepo)
 
 	err := soService.RestoreSalesOrders(restoreRequest, userInfo)
 	if err != nil {

@@ -7,7 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
-type FacilityType struct {
+type CustomerType struct {
 	ID    uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	Name  string `gorm:"size:100;uniqueIndex:ux_ft_name_ci;not null" json:"name"`
 	Color string `gorm:"size:20" json:"color"`
@@ -17,10 +17,10 @@ type FacilityType struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 
-	Facilities []Facility `gorm:"foreignKey:FacilityTypeID;references:ID" json:"facilities,omitempty"`
+	Customers []Customer `gorm:"foreignKey:CustomerTypeID;references:ID" json:"customers,omitempty"`
 }
 
-type ResponseGetFacilityType struct {
+type ResponseGetCustomerType struct {
 	ID    uuid.UUID `json:"id"`
 	Name  string    `json:"name"`
 	Color string    `json:"color"`
@@ -31,17 +31,17 @@ type ResponseGetFacilityType struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 }
 
-type FacilityTypeCreateRequest struct {
+type CustomerTypeCreateRequest struct {
 	Name  string `json:"name"`
 	Color string `json:"color"`
 	Description *string `json:"description"`
 }
 
-type FacilityTypeIsHardDeleteRequest struct {
+type CustomerTypeIsHardDeleteRequest struct {
 	IsHardDelete string      `json:"is_hard_delete" validate:"required"`
 	IDs          []uuid.UUID `json:"ids" validate:"required,dive,required"`
 }
 
-type FacilityTypeRestoreRequest struct {
+type CustomerTypeRestoreRequest struct {
 	IDs []uuid.UUID `json:"ids" validate:"required,dive,required"`
 }

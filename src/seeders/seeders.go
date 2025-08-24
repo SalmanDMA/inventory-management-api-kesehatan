@@ -3,6 +3,7 @@ package seeders
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func strptr(s string) *string { return &s }
@@ -29,6 +31,7 @@ func SeedRoles(db *gorm.DB) error {
 	roles := []models.Role{
 		{Name: "SUPERADMIN", Alias: "SA", Color: "#f00f00", Description: "Akun Super Admin"},
 		{Name: "DEVELOPER", Alias: "DEV", Color: "#000000", Description: "Akun Developer"},
+		{Name: "SALES", Alias: "SP", Color: "#00f000", Description: "Akun Sales"},
 	}
 
 	for _, role := range roles {
@@ -117,15 +120,17 @@ func SeedModules(db *gorm.DB) error {
 		{Name: "Modules", Route: "/dashboard/modules", Icon: "mdi:layers-triple", ModuleTypeID: moduleTypeMap["Route Menu"], ParentID: &accessControlModule.ID, Description: "Module Management Page"},
 		{Name: "Module Types", Route: "/dashboard/module-types", Icon: "mdi:layers", ModuleTypeID: moduleTypeMap["Route Hidden"], ParentID: &accessControlModule.ID, Description: "Module Type Management Page"},
 		{Name: "Items", Route: "/dashboard/items", Icon: "mdi:inboxes", ModuleTypeID: moduleTypeMap["Route Menu"], ParentID: &masterDataModule.ID, Description: "Item Management Page"},
+		{Name: "UoMs", Route: "/dashboard/uoms", Icon: "mdi:shape", ModuleTypeID: moduleTypeMap["Route Hidden"], ParentID: &masterDataModule.ID, Description: "Unit of Measurement Management Page"},
 		{Name: "Categories", Route: "/dashboard/categories", Icon: "mdi:category", ModuleTypeID: moduleTypeMap["Route Menu"], ParentID: &masterDataModule.ID, Description: "Category Management Page"},
 		{Name: "Item History", Route: "/dashboard/item-history", Icon: "mdi:history", ModuleTypeID: moduleTypeMap["Route Hidden"], ParentID: &masterDataModule.ID, Description: "Item History Page - Hidden Route"},
 		{Name: "Areas", Route: "/dashboard/areas", Icon: "mdi:map", ModuleTypeID: moduleTypeMap["Route Menu"], ParentID: &masterDataModule.ID, Description: "Area Management Page"},
-		{Name: "Facilities", Route: "/dashboard/facilities", Icon: "mdi:map-marker", ModuleTypeID: moduleTypeMap["Route Menu"], ParentID: &masterDataModule.ID, Description: "Facility Management Page"},
-		{Name: "Facility Types", Route: "/dashboard/facility-types", Icon: "mdi:map-marker", ModuleTypeID: moduleTypeMap["Route Hidden"], ParentID: &masterDataModule.ID, Description: "Facility Type Management Page"},
+		{Name: "Customers", Route: "/dashboard/customers", Icon: "mdi:map-marker", ModuleTypeID: moduleTypeMap["Route Menu"], ParentID: &masterDataModule.ID, Description: "Customer Management Page"},
+		{Name: "Customer Types", Route: "/dashboard/customer-types", Icon: "mdi:map-marker", ModuleTypeID: moduleTypeMap["Route Hidden"], ParentID: &masterDataModule.ID, Description: "Customer Type Management Page"},
 		{Name: "Sales", Route: "/dashboard/sales", Icon: "mdi:calendar-user-outline", ModuleTypeID: moduleTypeMap["Route Menu"], ParentID: &masterDataModule.ID, Description: "Sales Management Page"},
 		{Name: "Suppliers", Route: "/dashboard/suppliers", Icon: "mdi:account-group", ModuleTypeID: moduleTypeMap["Route Menu"], ParentID: &masterDataModule.ID, Description: "Supplier Management Page"},
 		{Name: "Purchase Orders", Route: "/dashboard/purchase-orders", Icon: "mdi:order-bool-descending", ModuleTypeID: moduleTypeMap["Route Menu"], ParentID: &transactionDataModule.ID, Description: "Purchase Order Management Page"},
 		{Name: "Sales Orders", Route: "/dashboard/sales-orders", Icon: "mdi:order-bool-ascending", ModuleTypeID: moduleTypeMap["Route Menu"], ParentID: &transactionDataModule.ID, Description: "Sales Order Management Page"},
+		{Name: "Sales Reports", Route: "/dashboard/sales-reports", Icon: "mdi:chart-line", ModuleTypeID: moduleTypeMap["Route Menu"], ParentID: &analyticsModule.ID, Description: "Sales Report Management Page"},
 		{Name: "Notifications", Route: "/dashboard/notifications", Icon: "mdi:bell", ModuleTypeID: moduleTypeMap["Route Menu"], ParentID: &analyticsModule.ID, Description: "Notification Management Page"},
 	}
 
@@ -237,6 +242,26 @@ func SeedModules(db *gorm.DB) error {
 		db.Where("name = ?", sm.Name).FirstOrCreate(&sm)
 	}
 
+	// Get "UoMs" module for service parent
+	var uomsModule models.Module
+	if err := db.Where("name = ?", "UoMs").First(&uomsModule).Error; err != nil {
+		return fmt.Errorf("failed to fetch UoMs module: %w", err)
+	}
+
+	// Service routes for UoM management
+	uomServiceModules := []models.Module{
+		{Name: "Get All UoMs", Path: fmt.Sprintf("%s/uom", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Get list of all UoMs", ParentID: &uomsModule.ID},
+		{Name: "Create UoM", Path: fmt.Sprintf("%s/uom", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Create a new UoM", ParentID: &uomsModule.ID},
+		{Name: "Restore UoM", Path: fmt.Sprintf("%s/uom/restore", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Restore soft-deleted UoM", ParentID: &uomsModule.ID},
+		{Name: "Delete UoM", Path: fmt.Sprintf("%s/uom/delete", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Delete UoM permanently", ParentID: &uomsModule.ID},
+		{Name: "Get UoM By ID", Path: fmt.Sprintf("%s/uom/:id", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Get UoM by ID", ParentID: &uomsModule.ID},
+		{Name: "Update UoM", Path: fmt.Sprintf("%s/uom/:id", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Update UoM by ID", ParentID: &uomsModule.ID},
+	}
+	
+	for _, sm := range uomServiceModules {
+		db.Where("name = ?", sm.Name).FirstOrCreate(&sm)
+	}
+
 	// Get "Categories" module for service parent
 	var categoriesModule models.Module
 	if err := db.Where("name = ?", "Categories").First(&categoriesModule).Error; err != nil {
@@ -293,39 +318,39 @@ func SeedModules(db *gorm.DB) error {
 		db.Where("name = ?", sm.Name).FirstOrCreate(&sm)
 	}
 
-	// Get "Facilities" module for service parent
-	var facilitiesModule models.Module
-	if err := db.Where("name = ?", "Facilities").First(&facilitiesModule).Error; err != nil {
-		return fmt.Errorf("failed to fetch Facilities module: %w", err)
+	// Get "Customers" module for service parent
+	var customersModule models.Module
+	if err := db.Where("name = ?", "Customers").First(&customersModule).Error; err != nil {
+		return fmt.Errorf("failed to fetch Customers module: %w", err)
 	}
 
-	// Service routes for facility management
-	facilitiesModules := []models.Module{
-		{Name: "Get All Facilities", Path: fmt.Sprintf("%s/facility", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Get list of all facilities", ParentID: &facilitiesModule.ID},
-		{Name: "Create Facility", Path: fmt.Sprintf("%s/facility", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Create a new facility", ParentID: &facilitiesModule.ID},
-		{Name: "Restore Facility", Path: fmt.Sprintf("%s/facility/restore", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Restore soft-deleted facility", ParentID: &facilitiesModule.ID},
-		{Name: "Delete Facility", Path: fmt.Sprintf("%s/facility/delete", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Delete facility permanently", ParentID: &facilitiesModule.ID},
+	// Service routes for customer management
+	customersModules := []models.Module{
+		{Name: "Get All Customers", Path: fmt.Sprintf("%s/customer", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Get list of all customers", ParentID: &customersModule.ID},
+		{Name: "Create Customer", Path: fmt.Sprintf("%s/customer", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Create a new customer", ParentID: &customersModule.ID},
+		{Name: "Restore Customer", Path: fmt.Sprintf("%s/customer/restore", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Restore soft-deleted customer", ParentID: &customersModule.ID},
+		{Name: "Delete Customer", Path: fmt.Sprintf("%s/customer/delete", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Delete customer permanently", ParentID: &customersModule.ID},
 	}
 
-	for _, sm := range facilitiesModules {
+	for _, sm := range customersModules {
 		db.Where("name = ?", sm.Name).FirstOrCreate(&sm)
 	}
 
-	// Get "Facility Types" module for service parent
-	var facilityTypesModule models.Module
-	if err := db.Where("name = ?", "Facility Types").First(&facilityTypesModule).Error; err != nil {
-		return fmt.Errorf("failed to fetch Facility Types module: %w", err)
+	// Get "Customer Types" module for service parent
+	var customerTypesModule models.Module
+	if err := db.Where("name = ?", "Customer Types").First(&customerTypesModule).Error; err != nil {
+		return fmt.Errorf("failed to fetch Customer Types module: %w", err)
 	}
 
-	// Service routes for facility type management 
-	facilityTypesModules := []models.Module{
-		{Name: "Get All Facility Types", Path: fmt.Sprintf("%s/facility-type", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Get list of all facility types", ParentID: &facilityTypesModule.ID},
-		{Name: "Create Facility Type", Path: fmt.Sprintf("%s/facility-type", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Create a new facility type", ParentID: &facilityTypesModule.ID},
-		{Name: "Restore Facility Type", Path: fmt.Sprintf("%s/facility-type/restore", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Restore soft-deleted facility type", ParentID: &facilityTypesModule.ID},
-		{Name: "Delete Facility Type", Path: fmt.Sprintf("%s/facility-type/delete", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Delete facility type permanently", ParentID: &facilityTypesModule.ID},
+	// Service routes for customer type management 
+	customerTypesModules := []models.Module{
+		{Name: "Get All Customer Types", Path: fmt.Sprintf("%s/customer-type", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Get list of all customer types", ParentID: &customerTypesModule.ID},
+		{Name: "Create Customer Type", Path: fmt.Sprintf("%s/customer-type", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Create a new customer type", ParentID: &customerTypesModule.ID},
+		{Name: "Restore Customer Type", Path: fmt.Sprintf("%s/customer-type/restore", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Restore soft-deleted customer type", ParentID: &customerTypesModule.ID},
+		{Name: "Delete Customer Type", Path: fmt.Sprintf("%s/customer-type/delete", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Delete customer type permanently", ParentID: &customerTypesModule.ID},
 	}
 
-	for _, sm := range facilityTypesModules {
+	for _, sm := range customerTypesModules {
 		db.Where("name = ?", sm.Name).FirstOrCreate(&sm)
 	}
 
@@ -439,6 +464,23 @@ func SeedModules(db *gorm.DB) error {
 		db.Where("name = ?", sm.Name).FirstOrCreate(&sm)
 	}
 
+	// Get "Sales Reports" module for sales report parent
+	var salesReportsModule models.Module
+	if err := db.Where("name = ?", "Sales Reports").First(&salesReportsModule).Error; err != nil {
+		return fmt.Errorf("failed to fetch Sales Reports module: %w", err)
+	}
+
+	// Service routes for sales report management
+	salesReportsServiceModules := []models.Module{
+		{Name: "Get All Sales Reports", Path: fmt.Sprintf("%s/sales-report", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Get all sales reports", ParentID: &salesReportsModule.ID},
+		{Name: "Get Summary Sales Report", Path: fmt.Sprintf("%s/sales-report/summary", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Get summary sales report", ParentID: &salesReportsModule.ID},
+		{Name: "Get Chart Sales Report", Path: fmt.Sprintf("%s/sales-report/charts", appVersion), ModuleTypeID: moduleTypeMap["Service API"], Description: "Get chart sales report", ParentID: &salesReportsModule.ID},
+	}
+
+	for _, sm := range salesReportsServiceModules {
+		db.Where("name = ?", sm.Name).FirstOrCreate(&sm)
+	}
+
 	log.Println("Modules seeded successfully!")
 	return nil
 }
@@ -450,14 +492,25 @@ func SeedModules(db *gorm.DB) error {
 func SeedRoleModules(db *gorm.DB) error {
 	log.Println("Seeding role-modules...")
 
-	var role models.Role
-	if err := db.First(&role, "name = ?", "DEVELOPER").Error; err != nil {
-		return fmt.Errorf("failed to find role 'DEVELOPER': %w", err)
-	}
-
 	var modules []models.Module
 	if err := db.Find(&modules).Error; err != nil {
 		return fmt.Errorf("failed to get modules: %w", err)
+	}
+
+	if err := seedRoleModulesForRole(db, "DEVELOPER", modules); err != nil {
+		return err
+	}
+	if err := seedRoleModulesForRole(db, "SUPERADMIN", modules); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func seedRoleModulesForRole(db *gorm.DB, roleName string, modules []models.Module) error {
+	var role models.Role
+	if err := db.First(&role, "name = ?", roleName).Error; err != nil {
+		return fmt.Errorf("failed to find role '%s': %w", roleName, err)
 	}
 
 	for _, module := range modules {
@@ -474,10 +527,9 @@ func SeedRoleModules(db *gorm.DB) error {
 			Checked:  true,
 		}
 		if err := db.Create(&roleModule).Error; err != nil {
-			return fmt.Errorf("failed to create role-module for module '%s': %w", module.Name, err)
+			return fmt.Errorf("failed to create role-module for role '%s' module '%s': %w", roleName, module.Name, err)
 		}
 	}
-
 	return nil
 }
 
@@ -505,109 +557,261 @@ func SeedCategories(db *gorm.DB) error {
 	return nil
 }
 
+
+// 
+// UOM SEEDER
+// 
+
+
+func SeedUoMs(db *gorm.DB) error {
+	log.Println("Seeding UoMs...")
+
+	type uomSeed struct {
+		Name        string
+		Color       string
+		Description *string
+	}
+
+	desc := func(s string) *string { return &s }
+
+	uoms := []uomSeed{
+		{Name: "PCS",   Color: "#0ea5e9", Description: desc("Piece / unit satuan umum")},
+		{Name: "BOX",   Color: "#22c55e", Description: desc("Kotak / box")},
+		{Name: "PACK",  Color: "#84cc16", Description: desc("Kemasan / pack")},
+		{Name: "PAIR",  Color: "#f97316", Description: desc("Sepasang (contoh sarung tangan)")},
+		{Name: "BOTOL", Color: "#a855f7", Description: desc("Botol")},
+		{Name: "LEMBAR",Color: "#eab308", Description: desc("Sheet / lembar")},
+	}
+
+	for _, s := range uoms {
+		u := models.UoM{
+			ID:          uuid.New(),
+			Name:        s.Name,
+			Color:       s.Color,
+			Description: s.Description,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+		if err := db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "name"}},
+			DoUpdates: clause.AssignmentColumns([]string{"color", "description", "updated_at"}),
+		}).Create(&u).Error; err != nil {
+			return fmt.Errorf("seed uom '%s' failed: %w", s.Name, err)
+		}
+	}
+
+	return nil
+}
+
+
 // 
 // ITEM SEEDER
 // 
 
 func SeedItems(db *gorm.DB) error {
-	log.Println("Seeding items...")
+	log.Println("Seeding items (idempotent)…")
 
-	var cats []models.Category
-	if err := db.Find(&cats).Error; err != nil {
-		return fmt.Errorf("failed to load categories: %w", err)
-	}
-	catID := map[string]uuid.UUID{}
-	for _, c := range cats {
-		catID[c.Name] = c.ID
-	}
+	loc := mustLoc("Asia/Jakarta")
+	now := time.Now().In(loc)
 
-	var developerUser models.User
-	if err := db.First(&developerUser, "username = ?", "devuser").Error; err != nil {
-		return fmt.Errorf("failed to find user 'devuser': %w", err)
-	}
-
-	type itemSeed struct {
-		Name        string
-		Code        string
-		CategoryName string
-		Price       int
-		Stock       int
-		LowStock    int
-		Description string
-	}
-	items := []itemSeed{
-		{"Paracetamol 500mg Tablets", "MED-PARA-500TAB", "Pharmaceuticals", 1200, 250, 50, "Analgesic/antipyretic"},
-		{"Amoxicillin 500mg Capsules", "MED-AMOX-500CAP", "Pharmaceuticals", 2500, 150, 30, "Antibiotic"},
-		{"Syringe 5 mL", "CON-SYR-05ML", "Consumables", 700, 500, 100, "Disposable syringe 5 mL"},
-		{"IV Cannula 22G", "CON-IVC-22G", "Consumables", 1800, 200, 40, "Peripheral IV cannula 22G"},
-		{"Surgical Gloves (Latex) - L (pair)", "PPE-GLV-L", "Personal Protective Equipment", 1500, 400, 80, "Latex gloves size L"},
-		{"3-Ply Surgical Mask", "PPE-MSK-3PLY", "Personal Protective Equipment", 500, 1000, 200, "Disposable 3-ply mask"},
-		{"N95 Respirator", "PPE-N95", "Personal Protective Equipment", 12000, 300, 60, "N95 respirator mask"},
-		{"Digital Thermometer", "DIA-THERM-DIG", "Diagnostics", 75000, 40, 10, "Digital body thermometer"},
-		{"Blood Pressure Monitor (Auto)", "DIA-BP-AUTO", "Diagnostics", 550000, 15, 5, "Automatic BP monitor"},
-		{"Infusion Pump", "EQP-INF-PUMP", "Medical Equipment", 12500000, 5, 2, "Volumetric infusion pump"},
-		{"Ultrasound Gel 5L", "CON-USG-5L", "Consumables", 95000, 25, 5, "Ultrasound transmission gel 5L"},
-		{"Hand Sanitizer 500ml", "CON-HS-500", "Consumables", 20000, 300, 50, "Alcohol-based hand rub 500ml"},
-	}
-
-	for _, s := range items {
-		cid, ok := catID[s.CategoryName]
-		if !ok || cid == uuid.Nil {
-			return fmt.Errorf("category '%s' not found; seed categories first", s.CategoryName)
+	return db.Transaction(func(tx *gorm.DB) error {
+		// ---------- refs ----------
+		var uoms []models.UoM
+		if err := tx.Find(&uoms).Error; err != nil {
+			return fmt.Errorf("failed to load uoms: %w", err)
+		}
+		uomID := map[string]uuid.UUID{}
+		for _, u := range uoms { uomID[u.Name] = u.ID }
+		getUoM := func(name string) (uuid.UUID, error) {
+			id, ok := uomID[name]; if !ok || id == uuid.Nil { return uuid.Nil, fmt.Errorf("UoM '%s' not found; seed UoMs first", name) }
+			return id, nil
 		}
 
-		item := models.Item{
-			ID:          uuid.New(),
-			Name:        s.Name,
-			Code:        s.Code,
-			CategoryID:  cid,
-			Price:       s.Price,
-			Stock:       s.Stock,
-			LowStock:    s.LowStock,
-			Description: s.Description,
+		var cats []models.Category
+		if err := tx.Find(&cats).Error; err != nil {
+			return fmt.Errorf("failed to load categories: %w", err)
 		}
-		if err := db.Create(&item).Error; err != nil {
-			return fmt.Errorf("failed to create item '%s': %w", item.Name, err)
+		catID := map[string]uuid.UUID{}
+		for _, c := range cats { catID[c.Name] = c.ID }
+		getCat := func(name string) (uuid.UUID, error) {
+			id, ok := catID[name]; if !ok || id == uuid.Nil { return uuid.Nil, fmt.Errorf("category '%s' not found; seed categories first", name) }
+			return id, nil
 		}
 
-		hPrice := models.ItemHistory{
-			ID:           uuid.New(),
-			ItemID:       item.ID,
-			ChangeType:   "create_price",
-			Description:  fmt.Sprintf("Initial price set to %d", item.Price),
-			OldPrice:     0,
-			NewPrice:     item.Price,
-			CurrentPrice: item.Price,
-			OldStock:     0,
-			NewStock:     0,
-			CurrentStock: 0,
-			CreatedBy:    &developerUser.ID,
-			UpdatedBy:    &developerUser.ID,
-		}
-		if err := db.Create(&hPrice).Error; err != nil {
-			return fmt.Errorf("failed to create item history (price) for '%s': %w", item.Name, err)
+		var developerUser models.User
+		if err := tx.First(&developerUser, "username = ?", "developer").Error; err != nil {
+			return fmt.Errorf("failed to find user 'developer': %w", err)
 		}
 
-		hStock := models.ItemHistory{
-			ID:           uuid.New(),
-			ItemID:       item.ID,
-			ChangeType:   "create_stock",
-			Description:  fmt.Sprintf("Initial stock set to %d", item.Stock),
-			OldStock:     0,
-			NewStock:     item.Stock,
-			CurrentStock: item.Stock,
-			OldPrice:     0,
-			NewPrice:     0,
-			CurrentPrice: 0,
-			CreatedBy:    &developerUser.ID,
-			UpdatedBy:    &developerUser.ID,
+		// ---------- config ----------
+		shelfLifeMonths := func(categoryName string) int {
+			switch categoryName {
+			case "Pharmaceuticals": return 24
+			case "Consumables": return 12
+			case "Personal Protective Equipment": return 18
+			case "Diagnostics": return 36
+			case "Medical Equipment": return 60
+			default: return 24
+			}
 		}
-		if err := db.Create(&hStock).Error; err != nil {
-			return fmt.Errorf("failed to create item history (stock) for '%s': %w", item.Name, err)
-		}
-	}
 
-	return nil
+		type itemSeed struct {
+			Name, Code, CategoryName, UoMName, Description string
+			Price, Stock, LowStock                          int
+		}
+		templates := []itemSeed{
+			{"Paracetamol 500mg Tablets", "MED-PARA-500TAB", "Pharmaceuticals", "BOX",   "Analgesic/antipyretic", 1200, 250,  50},
+			{"Amoxicillin 500mg Capsules","MED-AMOX-500CAP", "Pharmaceuticals", "BOX",   "Antibiotic",            2500, 150,  30},
+			{"Syringe 5 mL",               "CON-SYR-05ML",   "Consumables",     "PCS",   "Disposable syringe 5 mL", 700, 500, 100},
+			{"IV Cannula 22G",            "CON-IVC-22G",     "Consumables",     "PCS",   "Peripheral IV cannula 22G", 1800,200,40},
+			{"Surgical Gloves (Latex) - L (pair)", "PPE-GLV-L", "Personal Protective Equipment", "PAIR", "Latex gloves size L", 1500, 400, 80},
+			{"3-Ply Surgical Mask",       "PPE-MSK-3PLY",    "Personal Protective Equipment", "BOX",  "Disposable 3-ply mask", 500, 1000, 200},
+			{"N95 Respirator",            "PPE-N95",         "Personal Protective Equipment", "PCS",  "N95 respirator mask", 12000, 300, 60},
+			{"Digital Thermometer",       "DIA-THERM-DIG",   "Diagnostics",     "PCS",   "Digital body thermometer", 75000, 40, 10},
+			{"Blood Pressure Monitor (Auto)", "DIA-BP-AUTO", "Diagnostics",     "PCS",   "Automatic BP monitor", 550000, 15, 5},
+			{"Infusion Pump",             "EQP-INF-PUMP",    "Medical Equipment","PCS",  "Volumetric infusion pump", 12500000, 5, 2},
+			{"Ultrasound Gel 5L",         "CON-USG-5L",      "Consumables",     "BOTOL", "Ultrasound transmission gel 5L", 95000, 25, 5},
+			{"Hand Sanitizer 500ml",      "CON-HS-500",      "Consumables",     "BOTOL", "Alcohol-based hand rub 500ml", 20000, 300, 50},
+		}
+
+		// ---------- tentukan yang SUDAH ADA (by code), dan bangun daftar yang AKAN DIBUAT ----------
+		// siapkan semua code calon insert
+		type plan struct {
+			T itemSeed
+			Batch int
+			Code  string
+		}
+		var plans []plan
+		var allCodes []string
+
+		for _, t := range templates {
+			for b := 1; b <= 3; b++ {
+				c := fmt.Sprintf("%s-B%02d", t.Code, b)
+				allCodes = append(allCodes, c)
+				plans = append(plans, plan{T: t, Batch: b, Code: c})
+			}
+		}
+
+		// ambil code yang sudah ada
+		var existing []struct{ Code string }
+		if err := tx.Model(&models.Item{}).Select("code").Where("code IN ?", allCodes).Find(&existing).Error; err != nil {
+			return fmt.Errorf("check existing codes: %w", err)
+		}
+		exists := map[string]struct{}{}
+		for _, e := range existing { exists[e.Code] = struct{}{} }
+
+		// filter hanya yang belum ada
+		var missing []plan
+		for _, p := range plans {
+			if _, ok := exists[p.Code]; !ok {
+				missing = append(missing, p)
+			}
+		}
+
+		if len(missing) == 0 {
+			log.Println("SeedItems: nothing to insert (all present).")
+			return nil
+		}
+
+		// ---------- siapkan timeline sejumlah missing (elemen terakhir = now) ----------
+		buildTimeline := func(n int) []time.Time {
+			ts := make([]time.Time, 0, n)
+			for k := n - 1; k >= 0; k-- {
+				t := now.AddDate(0, -k, 0) // k bulan lalu s/d sekarang
+				yr, mo := t.Year(), t.Month()
+				day := min(28, 1+rand.Intn(28)) // biar aman di semua bulan
+				h, m, s := randHourMinute()
+				tt := time.Date(yr, mo, day, h, m, s, 0, loc)
+				if k == 0 { tt = now } // terakhir pasti now
+				ts = append(ts, tt)
+			}
+			return ts
+		}
+		timeline := buildTimeline(len(missing))
+
+		// ---------- insert missing ----------
+		for i, p := range missing {
+			createdAt := timeline[i]
+			updatedAt := createdAt.Add(time.Duration(rand.Intn(20*24)) * time.Hour)
+			if updatedAt.After(now) { updatedAt = createdAt }
+			b := p.Batch
+
+			cid, err := getCat(p.T.CategoryName)
+			if err != nil { return err }
+			uid, err := getUoM(p.T.UoMName)
+			if err != nil { return err }
+
+			baseMonths := shelfLifeMonths(p.T.CategoryName)
+			if baseMonths <= 0 { baseMonths = 24 }
+			monthsToAdd := baseMonths - (b-1)*6
+			if monthsToAdd < 3 { monthsToAdd = 3 }
+			exp := createdAt.AddDate(0, monthsToAdd, 0)
+
+			name := fmt.Sprintf("%s (B%02d)", p.T.Name, b) // unik by name juga
+			item := models.Item{
+				ID:          uuid.New(),
+				Name:        name,
+				Code:        p.Code,
+				CategoryID:  cid,
+				UoMID:       uid,
+				Price:       p.T.Price,
+				Stock:       p.T.Stock,
+				LowStock:    p.T.LowStock,
+				Description: p.T.Description,
+				Batch:       b,
+				ExpiredAt:   exp,
+				CreatedAt:   createdAt,
+				UpdatedAt:   updatedAt,
+			}
+			if err := tx.Create(&item).Error; err != nil {
+				return fmt.Errorf("create item '%s': %w", item.Code, err)
+			}
+
+			// histories pakai createdAt
+			hPrice := models.ItemHistory{
+				ID:           uuid.New(),
+				ItemID:       item.ID,
+				ChangeType:   "create_price",
+				Description:  fmt.Sprintf("Initial price set to %d (B%02d)", item.Price, b),
+				OldPrice:     0,
+				NewPrice:     item.Price,
+				CurrentPrice: item.Price,
+				OldStock:     0,
+				NewStock:     0,
+				CurrentStock: 0,
+				CreatedBy:    &developerUser.ID,
+				UpdatedBy:    &developerUser.ID,
+				CreatedAt:    createdAt,
+				UpdatedAt:    createdAt,
+			}
+			if err := tx.Create(&hPrice).Error; err != nil {
+				return fmt.Errorf("price history '%s': %w", item.Code, err)
+			}
+
+			hStock := models.ItemHistory{
+				ID:           uuid.New(),
+				ItemID:       item.ID,
+				ChangeType:   "create_stock",
+				Description:  fmt.Sprintf("Initial stock set to %d (B%02d)", item.Stock, b),
+				OldStock:     0,
+				NewStock:     item.Stock,
+				CurrentStock: item.Stock,
+				OldPrice:     0,
+				NewPrice:     0,
+				CurrentPrice: 0,
+				CreatedBy:    &developerUser.ID,
+				UpdatedBy:    &developerUser.ID,
+				CreatedAt:    createdAt,
+				UpdatedAt:    createdAt,
+			}
+			if err := tx.Create(&hStock).Error; err != nil {
+				return fmt.Errorf("stock history '%s': %w", item.Code, err)
+			}
+		}
+
+		log.Printf("SeedItems: inserted %d new items (last at now()).\n", len(missing))
+		return nil
+	})
 }
 
 // ======================================================================
@@ -669,10 +873,10 @@ func SeedAreas(db *gorm.DB) error {
 }
 
 // ======================================================================
-// SEED FACILITIES (beserta FacilityType)
+// SEED FACILITIES (beserta CustomerType)
 // ======================================================================
-func SeedFacilities(db *gorm.DB) error {
-	log.Println("Seeding facility types and facilities...")
+func SeedCustomers(db *gorm.DB) error {
+	log.Println("Seeding customer types and customers...")
 
 	ftSeeds := []struct {
 		ID          uuid.UUID
@@ -689,20 +893,20 @@ func SeedFacilities(db *gorm.DB) error {
 	}
 
 	for _, s := range ftSeeds {
-		ft := models.FacilityType{
+		ft := models.CustomerType{
 			ID:          s.ID,
 			Name:        s.Name,
 			Color:       s.Color,
 			Description: s.Desc,
 		}
 		if err := db.Create(&ft).Error; err != nil {
-			return fmt.Errorf("failed to create facility type '%s': %w", s.Name, err)
+			return fmt.Errorf("failed to create customer type '%s': %w", s.Name, err)
 		}
 	}
 
-	var types []models.FacilityType
+	var types []models.CustomerType
 	if err := db.Find(&types).Error; err != nil {
-		return fmt.Errorf("failed to load facility types: %w", err)
+		return fmt.Errorf("failed to load customer types: %w", err)
 	}
 	typeID := map[string]uuid.UUID{}
 	for _, t := range types {
@@ -726,7 +930,7 @@ func SeedFacilities(db *gorm.DB) error {
 	}
 
 	facSeeds := []struct {
-		Code, Name string
+		Nomor, Name string
 		TypeName   string
 		AreaCode   string
 		Address    *string
@@ -763,18 +967,18 @@ func SeedFacilities(db *gorm.DB) error {
 	for _, s := range facSeeds {
 		ftID, ok := typeID[s.TypeName]
 		if !ok || ftID == uuid.Nil {
-			return fmt.Errorf("facility type '%s' not found", s.TypeName)
+			return fmt.Errorf("customer type '%s' not found", s.TypeName)
 		}
 		arID, err := requireArea(s.AreaCode)
 		if err != nil {
 			return err
 		}
 
-		f := models.Facility{
+		f := models.Customer{
 			ID:             uuid.New(),
-			Code:           s.Code,
+			Nomor:           s.Nomor,
 			Name:           s.Name,
-			FacilityTypeID: ftID,
+			CustomerTypeID: ftID,
 			AreaID:         arID,
 			Address:        s.Address,
 			Phone:          s.Phone,
@@ -783,7 +987,7 @@ func SeedFacilities(db *gorm.DB) error {
 			Longitude:      s.Lng,
 		}
 		if err := db.Create(&f).Error; err != nil {
-			return fmt.Errorf("failed to create facility '%s': %w", f.Name, err)
+			return fmt.Errorf("failed to create customer '%s': %w", f.Name, err)
 		}
 	}
 
@@ -804,14 +1008,15 @@ func SeedSalesPersons(db *gorm.DB) error {
 		Email    *string
 		HireDate *time.Time
 		Address  *string
+		NPWP     *string
 	}
 	seeds := []spSeed{
-		{"Andi Pratama",  strptr("+62-811-1000-001"), strptr("andi.pratama@company.id"),  tptr(loc, 2023, time.January, 9),  strptr("Jl. Melati No. 12, Jakarta Selatan")},
-		{"Siti Rahma",    strptr("+62-811-1000-002"), strptr("siti.rahma@company.id"),    tptr(loc, 2023, time.March, 20),   strptr("Jl. Mawar No. 8, Jakarta Timur")},
-		{"Budi Santoso",  strptr("+62-811-1000-003"), strptr("budi.santoso@company.id"),  tptr(loc, 2022, time.November, 1), strptr("Jl. Cendana No. 5, Jakarta Barat")},
-		{"Dewi Lestari",  strptr("+62-811-1000-004"), strptr("dewi.lestari@company.id"),  tptr(loc, 2024, time.May, 6),      strptr("Jl. Kenanga No. 33, Jakarta Pusat")},
-		{"Fajar Nugroho", strptr("+62-811-1000-005"), strptr("fajar.nugroho@company.id"), tptr(loc, 2024, time.February, 12),strptr("Jl. Dahlia No. 2, Jakarta Utara")},
-		{"Gita Putri",    strptr("+62-811-1000-006"), strptr("gita.putri@company.id"),    tptr(loc, 2025, time.January, 13), strptr("Jl. Flamboyan No. 17, Depok")},
+		{"Andi Pratama",  strptr("+62-811-1000-001"), strptr("andi.pratama@company.id"),  tptr(loc, 2023, time.January, 9),  strptr("Jl. Melati No. 12, Jakarta Selatan"), nil},
+		{"Siti Rahma",    strptr("+62-811-1000-002"), strptr("siti.rahma@company.id"),    tptr(loc, 2023, time.March, 20),   strptr("Jl. Mawar No. 8, Jakarta Timur"), nil},
+		{"Budi Santoso",  strptr("+62-811-1000-003"), strptr("budi.santoso@company.id"),  tptr(loc, 2022, time.November, 1), strptr("Jl. Cendana No. 5, Jakarta Barat"), nil},
+		{"Dewi Lestari",  strptr("+62-811-1000-004"), strptr("dewi.lestari@company.id"),  tptr(loc, 2024, time.May, 6),      strptr("Jl. Kenanga No. 33, Jakarta Pusat"), nil},
+		{"Fajar Nugroho", strptr("+62-811-1000-005"), strptr("fajar.nugroho@company.id"), tptr(loc, 2024, time.February, 12),strptr("Jl. Dahlia No. 2, Jakarta Utara"), nil},
+		{"Gita Putri",    strptr("+62-811-1000-006"), strptr("gita.putri@company.id"),    tptr(loc, 2025, time.January, 13), strptr("Jl. Flamboyan No. 17, Depok"), nil},
 	}
 
 	spID := map[string]uuid.UUID{}
@@ -923,6 +1128,259 @@ func SeedSuppliers(db *gorm.DB) error {
 	return nil
 }
 
+// ======================================================================
+// SEED SALES ORDERS
+// ======================================================================
+func mustLoc(name string) *time.Location {
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return time.Local
+	}
+	return loc
+}
+
+func randHourMinute() (int, int, int) {
+	return 9 + rand.Intn(8), rand.Intn(60), rand.Intn(60)
+}
+
+func lastDayOfMonth(year int, month time.Month, loc *time.Location) int {
+	return time.Date(year, month+1, 0, 0, 0, 0, 0, loc).Day()
+}
+
+type spCustPair struct {
+	SP  models.SalesPerson
+	Cust models.Customer
+}
+
+func buildValidPairs(sps []models.SalesPerson, facs []models.Customer) []spCustPair {
+	var pairs []spCustPair
+	for _, sp := range sps {
+		areaIDs := map[uuid.UUID]struct{}{}
+		for _, as := range sp.Assignments {
+			areaIDs[as.AreaID] = struct{}{}
+		}
+		if len(areaIDs) == 0 {
+			continue
+		}
+		for _, f := range facs {
+			if _, ok := areaIDs[f.AreaID]; ok {
+				pairs = append(pairs, spCustPair{SP: sp, Cust: f})
+			}
+		}
+	}
+	return pairs
+}
+
+func SeedSalesOrders(db *gorm.DB) error {
+	log.Println("Seeding sales orders")
+
+	loc := mustLoc("Asia/Jakarta")
+	today := time.Now().In(loc)
+
+	start := time.Date(today.Year()-1, time.January, 1, 12, 0, 0, 0, loc)
+	end := time.Date(today.Year(), today.Month(), today.Day(), 23, 59, 0, 0, loc)
+
+	var salesPersons []models.SalesPerson
+	if err := db.Preload("Assignments").Find(&salesPersons).Error; err != nil {
+		return err
+	}
+	if len(salesPersons) == 0 {
+		return fmt.Errorf("no sales persons found, seed sales persons first")
+	}
+
+	var customers []models.Customer
+	if err := db.Find(&customers).Error; err != nil {
+		return err
+	}
+	if len(customers) == 0 {
+		return fmt.Errorf("no customers found, seed customers first")
+	}
+
+	var items []models.Item
+	if err := db.Find(&items).Error; err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return fmt.Errorf("no items found, seed items first")
+	}
+
+	pairs := buildValidPairs(salesPersons, customers)
+	if len(pairs) == 0 {
+		return fmt.Errorf("no valid SalesPerson–Customer pairs (area mismatch)")
+	}
+
+	statusOptions := []string{"Draft", "Confirmed", "Shipped", "Delivered", "Closed"}
+	paymentOptions := []string{"Unpaid", "Partial", "Paid"}
+	termOptions := []string{"Full", "DP", "Tempo"}
+
+	statusIdx, payIdx, termIdx := 0, 0, 0
+	pairIdx, itemIdx := 0, 0
+
+	var existingCount int64
+	if err := db.Model(&models.SalesOrder{}).Count(&existingCount).Error; err != nil {
+		return err
+	}
+	soCounter := int(existingCount) + 1
+	const ordersPerDay = 1 
+
+	for year, month := start.Year(), start.Month(); !time.Date(year, month, 1, 0, 0, 0, 0, loc).After(end); {
+		lastDay := lastDayOfMonth(year, month, loc)
+		if year == today.Year() && month == today.Month() {
+			lastDay = today.Day()
+		}
+
+		for day := 1; day <= lastDay; day++ {
+			hh, mm, _ := randHourMinute()
+			soDate := time.Date(year, month, day, hh, mm, rand.Intn(60), 0, loc)
+			createdAt := soDate
+
+			for k := 0; k < ordersPerDay; k++ {
+				term := termOptions[termIdx%len(termOptions)]
+				soStatus := statusOptions[statusIdx%len(statusOptions)]
+				payStatus := paymentOptions[payIdx%len(paymentOptions)]
+				termIdx++
+				statusIdx++
+				payIdx++
+
+				p := pairs[pairIdx%len(pairs)]
+				pairIdx++
+
+				estArrival := soDate.AddDate(0, 0, 3+rand.Intn(10)) 
+				dueDate := soDate.AddDate(0, 0, 14+rand.Intn(21)) 
+
+				if err := db.Transaction(func(tx *gorm.DB) error {
+					nItems := 3 + rand.Intn(4)
+					totalAmount := 0
+					chosenItems := make([]models.SalesOrderItem, 0, nItems)
+					for j := 0; j < nItems; j++ {
+						it := items[itemIdx%len(items)]
+						itemIdx++
+
+						qty := 1 + rand.Intn(5)
+						unitPrice := 50_000 + rand.Intn(300_000)
+						lineTotal := qty * unitPrice
+						totalAmount += lineTotal
+
+						chosenItems = append(chosenItems, models.SalesOrderItem{
+							ID:         uuid.New(),
+							ItemID:     it.ID,
+							UoMID:      it.UoMID,
+							Quantity:   qty,
+							UnitPrice:  unitPrice,
+							TotalPrice: lineTotal,
+							CreatedAt:  createdAt,
+							UpdatedAt:  createdAt,
+						})
+					}
+					if totalAmount <= 0 {
+						totalAmount = 1
+					}
+
+					dpAmount := 0
+					if term == "DP" {
+						dpAmount = int(float64(totalAmount) * 0.3) 
+						if dpAmount <= 0 {
+							dpAmount = 1
+						}
+					}
+
+					paidAmount := 0
+					switch payStatus {
+					case "Unpaid":
+						paidAmount = 0
+					case "Partial":
+						if term == "DP" {
+							paidAmount = dpAmount
+						} else {
+							paidAmount = int(float64(totalAmount) * 0.5)
+						}
+						if paidAmount <= 0 {
+							paidAmount = 1
+						}
+						if paidAmount >= totalAmount {
+							paidAmount = totalAmount - 1
+						}
+					case "Paid":
+						paidAmount = totalAmount
+					}
+
+					soID := uuid.New()
+					so := models.SalesOrder{
+						ID:               soID,
+						SONumber:         fmt.Sprintf("SO-%06d", soCounter),
+						SalesPersonID:    p.SP.ID,
+						CustomerID:       p.Cust.ID,
+						SODate:           soDate,
+						EstimatedArrival: &estArrival,
+						TermOfPayment:    term,
+						SOStatus:         soStatus,
+						PaymentStatus:    payStatus,
+						TotalAmount:      totalAmount,
+						PaidAmount:       paidAmount,
+						DPAmount:         dpAmount,
+						DueDate:          &dueDate,
+						Notes:            fmt.Sprintf("Seed %s -> %s (%s/%s/%s)", p.SP.Name, p.Cust.Name, term, soStatus, payStatus),
+						CreatedAt:        createdAt,
+						UpdatedAt:        createdAt,
+					}
+					if err := tx.Create(&so).Error; err != nil {
+						return err
+					}
+
+					for idx := range chosenItems {
+						chosenItems[idx].SalesOrderID = soID
+					}
+					if err := tx.Create(&chosenItems).Error; err != nil {
+						return err
+					}
+
+					if paidAmount > 0 {
+						payDate := soDate.AddDate(0, 0, 1+rand.Intn(10))
+						if payDate.After(end) {
+							payDate = end 
+						}
+						payment := models.Payment{
+							ID:              uuid.New(),
+							OrderType:       "SO",
+							SalesOrderID:    &soID,
+							PaymentType:     term, 
+							Amount:          paidAmount,
+							PaymentDate:     payDate,
+							PaymentMethod:   "Transfer",
+							ReferenceNumber: fmt.Sprintf("PAY-%06d", soCounter),
+							Notes:           "Seed payment",
+							CreatedAt:       createdAt,
+							UpdatedAt:       createdAt,
+						}
+						if err := tx.Create(&payment).Error; err != nil {
+							return err
+						}
+					}
+
+					return nil
+				}); err != nil {
+					return err
+				}
+
+				soCounter++
+			}
+		}
+
+		if month == time.December {
+			year++
+			month = time.January
+		} else {
+			month++
+		}
+		if time.Date(year, month, 1, 0, 0, 0, 0, loc).After(end) {
+			break
+		}
+	}
+
+	log.Println("Seeding sales orders completed")
+	return nil
+}
+
 //
 // USER SEEDER
 //
@@ -930,13 +1388,16 @@ func SeedSuppliers(db *gorm.DB) error {
 func SeedUsers(db *gorm.DB) error {
 	log.Println("Seeding users...")
 
-	var developerRole, superadminRole models.Role
+	var developerRole, superadminRole, salesRole models.Role
 
 	if err := db.First(&developerRole, "name = ?", "DEVELOPER").Error; err != nil {
 		return fmt.Errorf("failed to find role 'DEVELOPER': %w", err)
 	}
 	if err := db.First(&superadminRole, "name = ?", "SUPERADMIN").Error; err != nil {
 		return fmt.Errorf("failed to find role 'SUPERADMIN': %w", err)
+	}
+	if err := db.First(&salesRole, "name = ?", "SALES").Error; err != nil {
+		return fmt.Errorf("failed to find role 'SALES': %w", err)
 	}
 
 	hashedPassword, err := helpers.HashPassword("password")
@@ -945,8 +1406,10 @@ func SeedUsers(db *gorm.DB) error {
 	}
 
 	users := []models.User{
-		{Username: "devuser", Password: hashedPassword, Name: "Developer", Email: "dev@example.com", RoleID: &developerRole.ID},
+		{Username: "developer", Password: hashedPassword, Name: "Developer", Email: "dev@example.com", RoleID: &developerRole.ID},
 		{Username: "superadmin", Password: hashedPassword, Name: "Superadmin", Email: "superadmin@example.com", RoleID: &superadminRole.ID},
+		{Username: "adit", Password: hashedPassword, Name: "Adit", Email: "adit@example.com", RoleID: &superadminRole.ID},
+		{Username: "sales", Password: hashedPassword, Name: "Sales", Email: "sales@example.com", RoleID: &salesRole.ID},
 	}
 
 	for _, user := range users {

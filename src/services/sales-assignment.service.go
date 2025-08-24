@@ -1,6 +1,9 @@
 package services
 
 import (
+	"fmt"
+
+	"github.com/SalmanDMA/inventory-app/backend/src/configs"
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
 	"github.com/gofiber/fiber/v2"
@@ -9,66 +12,94 @@ import (
 
 type SalesAssignmentService struct {
 	SalesAssignmentRepository repositories.SalesAssignmentRepository
-	AreaRepository     repositories.AreaRepository
+	AreaRepository            repositories.AreaRepository
 }
 
-func NewSalesAssignmentService(salesAssignmentRepository repositories.SalesAssignmentRepository, areaRepository repositories.AreaRepository) *SalesAssignmentService {
+func NewSalesAssignmentService(
+	saRepo repositories.SalesAssignmentRepository,
+	areaRepo repositories.AreaRepository,
+) *SalesAssignmentService {
 	return &SalesAssignmentService{
-		SalesAssignmentRepository: salesAssignmentRepository, 
-		AreaRepository: areaRepository,
+		SalesAssignmentRepository: saRepo,
+		AreaRepository:            areaRepo,
 	}
 }
 
 func (s *SalesAssignmentService) GetAllSalesAssignment(salesPersonID uuid.UUID) ([]models.ResponseGetSalesAssignment, error) {
-	salesAssignments, err := s.SalesAssignmentRepository.FindAll(salesPersonID)
-
+	rows, err := s.SalesAssignmentRepository.FindAll(nil, salesPersonID)
 	if err != nil {
 		return nil, err
 	}
 
-	salesAssignmentsResponse := []models.ResponseGetSalesAssignment{}
-
-	for _, salesAssignment := range salesAssignments {
-		salesAssignmentsResponse = append(salesAssignmentsResponse, models.ResponseGetSalesAssignment{
-			ID:        salesAssignment.ID,
-			SalesPersonID: salesAssignment.SalesPersonID,
-		 AreaID:        salesAssignment.AreaID,
-			Area:          salesAssignment.Area,
-			SalesPerson:   salesAssignment.SalesPerson,
-			Checked:   salesAssignment.Checked,
+	out := make([]models.ResponseGetSalesAssignment, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, models.ResponseGetSalesAssignment{
+			ID:            r.ID,
+			SalesPersonID: r.SalesPersonID,
+			AreaID:        r.AreaID,
+			Area:          r.Area,
+			SalesPerson:   r.SalesPerson,
+			Checked:       r.Checked,
 		})
 	}
-
-	return salesAssignmentsResponse, nil
+	return out, nil
 }
 
-func (s *SalesAssignmentService) CreateOrUpdateSalesAssignment(salesPersonID uuid.UUID, salesAssignmentRequest *models.SalesAssignmentRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.SalesAssignment, error) {
-	existingSalesAssignment, err := s.SalesAssignmentRepository.FindBySalesAndAreaID(salesPersonID, salesAssignmentRequest.AreaID)
+func (s *SalesAssignmentService) CreateOrUpdateSalesAssignment(
+	salesPersonID uuid.UUID,
+	req *models.SalesAssignmentRequest,
+	ctx *fiber.Ctx,
+	userInfo *models.User,
+) (*models.SalesAssignment, error) {
+	_ = ctx
+	_ = userInfo
+
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// optional: validasi area exist
+	if _, err := s.AreaRepository.FindById(tx, req.AreaID.String(), false); err != nil {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("area not found: %w", err)
+	}
+
+	existing, err := s.SalesAssignmentRepository.FindBySalesAndAreaID(tx, salesPersonID, req.AreaID)
 	if err != nil {
+		_ = tx.Rollback()
 		return nil, err
 	}
 
 	var result *models.SalesAssignment
-
-	if existingSalesAssignment == nil {
-		newSalesAssignment := &models.SalesAssignment{
-			ID:       uuid.New(),
-			SalesPersonID:   salesPersonID,
-			AreaID:   salesAssignmentRequest.AreaID,
-			Checked:  salesAssignmentRequest.Checked,
+	if existing == nil {
+		row := &models.SalesAssignment{
+			ID:            uuid.New(),
+			SalesPersonID: salesPersonID,
+			AreaID:        req.AreaID,
+			Checked:       req.Checked,
 		}
-		result, err = s.SalesAssignmentRepository.Insert(newSalesAssignment)
+		result, err = s.SalesAssignmentRepository.Insert(tx, row)
 		if err != nil {
+			_ = tx.Rollback()
 			return nil, err
 		}
 	} else {
-		existingSalesAssignment.Checked = salesAssignmentRequest.Checked
-		result, err = s.SalesAssignmentRepository.Update(existingSalesAssignment)
+		existing.Checked = req.Checked
+		result, err = s.SalesAssignmentRepository.Update(tx, existing)
 		if err != nil {
+			_ = tx.Rollback()
 			return nil, err
 		}
 	}
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
 	return result, nil
 }
-
-

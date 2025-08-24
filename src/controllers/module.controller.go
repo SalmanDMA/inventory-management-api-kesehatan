@@ -119,7 +119,7 @@ func ModuleControllerGetById(ctx *fiber.Ctx) error {
 	}
 
 	moduleRepo := repositories.NewModuleRepository(configs.DB)
-	module, err := moduleRepo.FindById(moduleId, false)
+	module, err := moduleRepo.FindById(nil, moduleId, false)
 
 	if err != nil {
 		if err == repositories.ErrModuleNotFound {

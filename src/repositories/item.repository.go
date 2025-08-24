@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
@@ -9,22 +10,30 @@ import (
 	"gorm.io/gorm"
 )
 
+// ==============================
+// Interface (transaction-aware)
+// ==============================
+
 type ItemRepository interface {
-	FindAll() ([]models.Item, error)
-	FindAllPaginated(req *models.PaginationRequest) ([]models.Item, int64, error)
-	FindById(itemId string, includeTrash bool) (*models.Item, error)
-	FindByName(itemName string) (*models.Item, error)
-	CountAllThisMonth() (int64, error)
-	CountAllLastMonth() (int64, error)
-	CountLowStockNow() (int64, error)
-	CountLowStockLastMonth() (int64, error)
-	Insert(item *models.Item) (*models.Item, error)
-	Update(item *models.Item) (*models.Item, error)
-	Delete(itemId string, isHardDelete bool) error
-	Restore(item *models.Item, itemId string) (*models.Item, error)
+	FindAll(tx *gorm.DB) ([]models.Item, error)
+	FindAllPaginated(tx *gorm.DB, req *models.PaginationRequest) ([]models.Item, int64, error)
+	FindById(tx *gorm.DB, itemId string, includeTrashed bool) (*models.Item, error)
+	FindByName(tx *gorm.DB, itemName string) (*models.Item, error)
+	CountAllThisMonth(tx *gorm.DB) (int64, error)
+	CountAllLastMonth(tx *gorm.DB) (int64, error)
+	CountLowStockNow(tx *gorm.DB) (int64, error)
+	CountLowStockLastMonth(tx *gorm.DB) (int64, error)
+	Insert(tx *gorm.DB, item *models.Item) (*models.Item, error)
+	Update(tx *gorm.DB, item *models.Item) (*models.Item, error)
+	Delete(tx *gorm.DB, itemId string, isHardDelete bool) error
+	Restore(tx *gorm.DB, itemId string) (*models.Item, error)
 }
 
-type ItemRepositoryImpl struct{
+// ==============================
+// Implementation
+// ==============================
+
+type ItemRepositoryImpl struct {
 	DB *gorm.DB
 }
 
@@ -32,10 +41,20 @@ func NewItemRepository(db *gorm.DB) *ItemRepositoryImpl {
 	return &ItemRepositoryImpl{DB: db}
 }
 
-func (r *ItemRepositoryImpl) FindAll() ([]models.Item, error) {
+func (r *ItemRepositoryImpl) useDB(tx *gorm.DB) *gorm.DB {
+	if tx != nil {
+		return tx
+	}
+	return r.DB
+}
+
+// ---------- Reads ----------
+
+func (r *ItemRepositoryImpl) FindAll(tx *gorm.DB) ([]models.Item, error) {
 	var items []models.Item
-	db := r.DB.Unscoped().
+	db := r.useDB(tx).Unscoped().
 		Preload("Image").
+		Preload("UoM").
 		Preload("Category").
 		Preload("ItemHistories")
 
@@ -45,23 +64,27 @@ func (r *ItemRepositoryImpl) FindAll() ([]models.Item, error) {
 	return items, nil
 }
 
-func (r *ItemRepositoryImpl) FindAllPaginated(req *models.PaginationRequest) ([]models.Item, int64, error) {
-	var items []models.Item
-	var totalCount int64
+func (r *ItemRepositoryImpl) FindAllPaginated(tx *gorm.DB, req *models.PaginationRequest) ([]models.Item, int64, error) {
+	var (
+		items      []models.Item
+		totalCount int64
+	)
 
-	query := r.DB.Unscoped().
+	query := r.useDB(tx).Unscoped().
 		Preload("Image").
+		Preload("UoM").
 		Preload("Category").
 		Preload("ItemHistories")
 
 	switch req.Status {
 	case "active":
-		query = query.Where("deleted_at IS NULL")
+		query = query.Where("items.deleted_at IS NULL")
 	case "deleted":
-		query = query.Where("deleted_at IS NOT NULL")
+		query = query.Where("items.deleted_at IS NOT NULL")
 	case "all":
+		// no filter
 	default:
-		query = query.Where("deleted_at IS NULL")
+		query = query.Where("items.deleted_at IS NULL")
 	}
 
 	if req.CategoryID != "" {
@@ -69,21 +92,31 @@ func (r *ItemRepositoryImpl) FindAllPaginated(req *models.PaginationRequest) ([]
 			query = query.Where("category_id = ?", catUUID)
 		}
 	}
+	if req.UoMID != "" {
+		if uomUUID, err := uuid.Parse(req.UoMID); err == nil {
+			query = query.Where("uom_id = ?", uomUUID)
+		}
+	}
+	if b := strings.TrimSpace(req.Batch); b != "" {
+			n, err := strconv.Atoi(b)
+			if err != nil {
+					return nil, 0, fmt.Errorf("invalid batch number: %s", b)
+			}
+			query = query.Where("items.batch = ?", n)
+	}
 
-	if req.Search != "" {
-		searchPattern := "%" + strings.ToLower(req.Search) + "%"
-		query = query.Joins("LEFT JOIN categories ON categories.id = items.category_id").
+	if s := strings.TrimSpace(req.Search); s != "" {
+		p := "%" + strings.ToLower(s) + "%"
+		query = query.
+			Joins("LEFT JOIN categories ON categories.id = items.category_id").
 			Where(`
 				LOWER(items.name) LIKE ? OR
 				LOWER(items.code) LIKE ? OR
-				LOWER(items.description) LIKE ? OR
+				LOWER(COALESCE(items.description, '')) LIKE ? OR
 				CAST(items.price AS TEXT) LIKE ? OR
 				CAST(items.stock AS TEXT) LIKE ? OR
 				LOWER(categories.name) LIKE ?
-			`,
-			searchPattern, searchPattern, searchPattern,
-			searchPattern, searchPattern, searchPattern,
-		)
+			`, p, p, p, p, p, p)
 	}
 
 	if err := query.Model(&models.Item{}).Count(&totalCount).Error; err != nil {
@@ -94,118 +127,132 @@ func (r *ItemRepositoryImpl) FindAllPaginated(req *models.PaginationRequest) ([]
 	if err := query.Offset(offset).Limit(req.Limit).Find(&items).Error; err != nil {
 		return nil, 0, HandleDatabaseError(err, "item")
 	}
-
 	return items, totalCount, nil
 }
 
-func (r *ItemRepositoryImpl) FindById(itemId string, includeTrash bool) (*models.Item, error) {
-	var item *models.Item
-	db := r.DB
-
-	if includeTrash {
+func (r *ItemRepositoryImpl) FindById(tx *gorm.DB, itemId string, includeTrashed bool) (*models.Item, error) {
+	var item models.Item
+	db := r.useDB(tx)
+	if includeTrashed {
 		db = db.Unscoped()
 	}
 
 	if err := db.
 		Preload("Image").
-	 Preload("Category").
+		Preload("UoM").
+		Preload("Category").
 		Preload("ItemHistories").
-	 First(&item, "id = ?", itemId).Error; err != nil {
+		First(&item, "id = ?", itemId).Error; err != nil {
 		return nil, HandleDatabaseError(err, "item")
 	}
-	
-	return item, nil
+	return &item, nil
 }
 
-func (r *ItemRepositoryImpl) FindByName(itemName string) (*models.Item, error) {
-	var item *models.Item
-	if err := r.DB.Where("name = ?", itemName).First(&item).Error; err != nil {
+func (r *ItemRepositoryImpl) FindByName(tx *gorm.DB, itemName string) (*models.Item, error) {
+	var item models.Item
+	if err := r.useDB(tx).
+		Where("name = ?", itemName).
+		First(&item).Error; err != nil {
 		return nil, HandleDatabaseError(err, "item")
 	}
-	return item, nil
+	return &item, nil
 }
 
-func (r *ItemRepositoryImpl) CountAllThisMonth() (int64, error) {
+// ---------- Counts ----------
+
+func (r *ItemRepositoryImpl) CountAllThisMonth(tx *gorm.DB) (int64, error) {
 	var count int64
-	err := r.DB.Model(&models.Item{}).
+	err := r.useDB(tx).Model(&models.Item{}).
 		Where("DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())").
 		Count(&count).Error
 	return count, err
 }
 
-func (r *ItemRepositoryImpl) CountAllLastMonth() (int64, error) {
+func (r *ItemRepositoryImpl) CountAllLastMonth(tx *gorm.DB) (int64, error) {
 	var count int64
-	err := r.DB.Model(&models.Item{}).
+	err := r.useDB(tx).Model(&models.Item{}).
 		Where("DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW() - INTERVAL '1 month')").
 		Count(&count).Error
 	return count, err
 }
 
-func (r *ItemRepositoryImpl) CountLowStockNow() (int64, error) {
+func (r *ItemRepositoryImpl) CountLowStockNow(tx *gorm.DB) (int64, error) {
 	var count int64
-	err := r.DB.Model(&models.Item{}).
-		Where("deleted_at IS NULL").
+	err := r.useDB(tx).Model(&models.Item{}).
 		Where("stock <= low_stock").
 		Count(&count).Error
 	return count, err
 }
 
-func (r *ItemRepositoryImpl) CountLowStockLastMonth() (int64, error) {
-	return r.CountLowStockNow()
+func (r *ItemRepositoryImpl) CountLowStockLastMonth(tx *gorm.DB) (int64, error) {
+	var count int64
+	err := r.useDB(tx).Model(&models.Item{}).
+		Where("DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW() - INTERVAL '1 month')").
+		Where("stock <= low_stock").
+		Count(&count).Error
+	return count, err
 }
 
-func (r *ItemRepositoryImpl) Insert(item *models.Item) (*models.Item, error) {
+// ---------- Mutations ----------
 
+func (r *ItemRepositoryImpl) Insert(tx *gorm.DB, item *models.Item) (*models.Item, error) {
 	if item.ID == uuid.Nil {
 		return nil, fmt.Errorf("item ID cannot be empty")
 	}
-
-	if err := r.DB.Create(&item).Error; err != nil {
+	if err := r.useDB(tx).Create(item).Error; err != nil {
 		return nil, HandleDatabaseError(err, "item")
 	}
 	return item, nil
 }
 
-func (r *ItemRepositoryImpl) Update(item *models.Item) (*models.Item, error) {
-
+func (r *ItemRepositoryImpl) Update(tx *gorm.DB, item *models.Item) (*models.Item, error) {
 	if item.ID == uuid.Nil {
 		return nil, fmt.Errorf("item ID cannot be empty")
 	}
-
-	if err := r.DB.Save(&item).Error; err != nil {
+	if err := r.useDB(tx).Save(item).Error; err != nil {
 		return nil, HandleDatabaseError(err, "item")
 	}
 	return item, nil
 }
 
-func (r *ItemRepositoryImpl) Delete(itemId string, isHardDelete bool) error {
-	var item *models.Item
+func (r *ItemRepositoryImpl) Delete(tx *gorm.DB, itemId string, isHardDelete bool) error {
+	db := r.useDB(tx)
 
-	if err := r.DB.Unscoped().First(&item, "id = ?", itemId).Error; err != nil {
+	var item models.Item
+	if err := db.Unscoped().First(&item, "id = ?", itemId).Error; err != nil {
 		return HandleDatabaseError(err, "item")
 	}
-	
+
 	if isHardDelete {
-		if err := r.DB.Unscoped().Delete(&item).Error; err != nil {
+		if err := db.Unscoped().Delete(&item).Error; err != nil {
 			return HandleDatabaseError(err, "item")
 		}
 	} else {
-		if err := r.DB.Delete(&item).Error; err != nil {
+		if err := db.Delete(&item).Error; err != nil {
 			return HandleDatabaseError(err, "item")
 		}
 	}
 	return nil
 }
 
-func (r *ItemRepositoryImpl) Restore(item *models.Item, itemId string) (*models.Item, error) {
-	if err := r.DB.Unscoped().Model(item).Where("id = ?", itemId).Update("deleted_at", nil).Error; err != nil {
-		return nil, err
+func (r *ItemRepositoryImpl) Restore(tx *gorm.DB, itemId string) (*models.Item, error) {
+	db := r.useDB(tx)
+
+	if err := db.Unscoped().
+		Model(&models.Item{}).
+		Where("id = ?", itemId).
+		Update("deleted_at", nil).Error; err != nil {
+		return nil, HandleDatabaseError(err, "item")
 	}
 
-	var restoredItem *models.Item
-	if err := r.DB.Unscoped().First(&restoredItem, "id = ?", itemId).Error; err != nil {
-		return nil, err
+	var restored models.Item
+	if err := db.
+		Preload("Image").
+		Preload("UoM").
+		Preload("Category").
+		Preload("ItemHistories").
+		First(&restored, "id = ?", itemId).Error; err != nil {
+		return nil, HandleDatabaseError(err, "item")
 	}
-	
-	return restoredItem, nil
+	return &restored, nil
 }

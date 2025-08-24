@@ -15,13 +15,11 @@ import (
 )
 
 func main() {
-	// Load .env if not in PRODUCTION
-	if os.Getenv("ENVIRONMENT") != "PRODUCTION" {
-		if err := godotenv.Load(".env"); err != nil {
-			log.Fatal("Error loading .env:", err)
-		}
+	// Load .env
+	if err := godotenv.Load(".env"); err != nil {
+		log.Fatal("Error loading .env:", err)
 	}
-
+	
 	// Minio connection
 	configs.InitMinio()
 

@@ -34,7 +34,8 @@ func GetAllPurchaseOrders(ctx *fiber.Ctx) error {
 	supplierRepo := repositories.NewSupplierRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo,	itemHistoryRepo)
 
 	pos, err := poService.GetAllPurchaseOrders()
 	if err != nil {
@@ -82,7 +83,8 @@ func GetAllPurchaseOrdersPaginated(ctx *fiber.Ctx) error {
 	supplierRepo := repositories.NewSupplierRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo,	itemHistoryRepo)
 
 	result, err := poService.GetAllPurchaseOrdersPaginated(paginationReq, userInfo)
 	if err != nil {
@@ -116,7 +118,8 @@ func GetPurchaseOrderByID(ctx *fiber.Ctx) error {
 	supplierRepo := repositories.NewSupplierRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo,	itemHistoryRepo)
 
 	po, err := poService.GetPurchaseOrderByID(poId)
 	if err != nil {
@@ -147,7 +150,8 @@ func GenerateDocumentPurchaseOrder(ctx *fiber.Ctx) error {
 	supplierRepo := repositories.NewSupplierRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo,	itemHistoryRepo)
 
 	filename, pdfBytes, err := poService.GenerateDocumentPurchaseOrder(poId)
 	if err != nil {
@@ -193,7 +197,8 @@ func CreatePurchaseOrder(ctx *fiber.Ctx) error {
 	supplierRepo := repositories.NewSupplierRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo,	itemHistoryRepo)
 
 	po, err := poService.CreatePurchaseOrder(poRequest, userInfo)
 	if err != nil {
@@ -239,7 +244,8 @@ func UpdatePurchaseOrder(ctx *fiber.Ctx) error {
 	supplierRepo := repositories.NewSupplierRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo,	itemHistoryRepo)
 
 	po, err := poService.UpdatePurchaseOrder(poId, poRequest, userInfo)
 	if err != nil {
@@ -285,7 +291,8 @@ func UpdatePurchaseOrderStatus(ctx *fiber.Ctx) error {
 	supplierRepo := repositories.NewSupplierRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo,	itemHistoryRepo)
 
 	err := poService.UpdatePurchaseOrderStatus(poId, statusRequest, userInfo)
 	if err != nil {
@@ -331,7 +338,8 @@ func ReceiveItems(ctx *fiber.Ctx) error {
 	supplierRepo := repositories.NewSupplierRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo,	itemHistoryRepo)
 
 	err := poService.ReceiveItems(poId, receiveRequest, userInfo)
 	if err != nil {
@@ -375,7 +383,8 @@ func DeletePurchaseOrders(ctx *fiber.Ctx) error {
 	supplierRepo := repositories.NewSupplierRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo,	itemHistoryRepo)
 
 	err := poService.DeletePurchaseOrders(deleteRequest, userInfo)
 	if err != nil {
@@ -424,12 +433,13 @@ func RestorePurchaseOrders(ctx *fiber.Ctx) error {
 	supplierRepo := repositories.NewSupplierRepository(configs.DB)
 	itemRepo := repositories.NewItemRepository(configs.DB)
 	paymentRepo := repositories.NewPaymentRepository(configs.DB)
-	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo)
+	itemHistoryRepo := repositories.NewItemHistoryRepository(configs.DB)
+	poService := services.NewPurchaseOrderService(poRepo, supplierRepo, itemRepo, paymentRepo,	itemHistoryRepo)
 
-	err := poService.RestorePurchaseOrders(restoreRequest, userInfo)
+	pos, err := poService.RestorePurchaseOrders(restoreRequest, userInfo)
 	if err != nil {
 		return helpers.Response(ctx, fiber.StatusBadRequest, "Failed to restore purchase orders", err.Error())
 	}
 
-	return helpers.Response(ctx, fiber.StatusOK, "Purchase orders restored successfully", nil)
+	return helpers.Response(ctx, fiber.StatusOK, "Purchase orders restored successfully", pos)
 }

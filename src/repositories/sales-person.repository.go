@@ -10,16 +10,24 @@ import (
 	"gorm.io/gorm"
 )
 
+// ==============================
+// Interface (transaction-aware)
+// ==============================
+
 type SalesPersonRepository interface {
-	FindAll() ([]models.SalesPerson, error)
-	FindAllPaginated(req *models.PaginationRequest) ([]models.SalesPerson, int64, error)
-	FindByEmail(email string) (*models.SalesPerson, error)
-	FindById(salesPersonId string, isSoftDelete bool) (*models.SalesPerson, error)
-	Insert(salesPerson *models.SalesPerson) (*models.SalesPerson, error)
-	Update(salesPerson *models.SalesPerson) (*models.SalesPerson, error)
-	Delete(salesPersonId string, isHardDelete bool) error
-	Restore(salesPerson *models.SalesPerson, salesPersonId string) (*models.SalesPerson, error)
+	FindAll(tx *gorm.DB) ([]models.SalesPerson, error)
+	FindAllPaginated(tx *gorm.DB, req *models.PaginationRequest) ([]models.SalesPerson, int64, error)
+	FindByEmail(tx *gorm.DB, email string) (*models.SalesPerson, error)
+	FindById(tx *gorm.DB, salesPersonId string, includeTrashed bool) (*models.SalesPerson, error)
+	Insert(tx *gorm.DB, salesPerson *models.SalesPerson) (*models.SalesPerson, error)
+	Update(tx *gorm.DB, salesPerson *models.SalesPerson) (*models.SalesPerson, error)
+	Delete(tx *gorm.DB, salesPersonId string, isHardDelete bool) error
+	Restore(tx *gorm.DB, salesPersonID string) (*models.SalesPerson, error)
 }
+
+// ==============================
+// Implementation
+// ==============================
 
 type SalesPersonRepositoryImpl struct {
 	DB *gorm.DB
@@ -29,41 +37,53 @@ func NewSalesPersonRepository(db *gorm.DB) *SalesPersonRepositoryImpl {
 	return &SalesPersonRepositoryImpl{DB: db}
 }
 
-func (r *SalesPersonRepositoryImpl) FindAll() ([]models.SalesPerson, error) {
+func (r *SalesPersonRepositoryImpl) useDB(tx *gorm.DB) *gorm.DB {
+	if tx != nil {
+		return tx
+	}
+	return r.DB
+}
+
+// ---------- Reads ----------
+
+func (r *SalesPersonRepositoryImpl) FindAll(tx *gorm.DB) ([]models.SalesPerson, error) {
 	var salesPersons []models.SalesPerson
-	if err := r.DB.Unscoped().
-	 Preload("Assignments").
+	if err := r.useDB(tx).
+		Unscoped().
+		Preload("Assignments").
 		Find(&salesPersons).Error; err != nil {
 		return nil, HandleDatabaseError(err, "sales_person")
 	}
 	return salesPersons, nil
 }
 
-func (r *SalesPersonRepositoryImpl) FindAllPaginated(req *models.PaginationRequest) ([]models.SalesPerson, int64, error) {
+func (r *SalesPersonRepositoryImpl) FindAllPaginated(tx *gorm.DB, req *models.PaginationRequest) ([]models.SalesPerson, int64, error) {
 	var (
 		salesPersons []models.SalesPerson
 		totalCount   int64
 	)
 
-	spStmt := &gorm.Statement{DB: r.DB}
+	db := r.useDB(tx)
+
+	spStmt := &gorm.Statement{DB: db}
 	if err := spStmt.Parse(&models.SalesPerson{}); err != nil {
 		return nil, 0, err
 	}
 	spTable := spStmt.Schema.Table
 
-	saStmt := &gorm.Statement{DB: r.DB}
+	saStmt := &gorm.Statement{DB: db}
 	if err := saStmt.Parse(&models.SalesAssignment{}); err != nil {
 		return nil, 0, err
 	}
 	saTable := saStmt.Schema.Table
 
-	areaStmt := &gorm.Statement{DB: r.DB}
+	areaStmt := &gorm.Statement{DB: db}
 	if err := areaStmt.Parse(&models.Area{}); err != nil {
 		return nil, 0, err
 	}
-	areaTable := areaStmt.Schema.Table 
+	areaTable := areaStmt.Schema.Table
 
-	query := r.DB.
+	query := db.
 		Unscoped().
 		Model(&models.SalesPerson{}).
 		Preload("Assignments", "deleted_at IS NULL").
@@ -75,6 +95,7 @@ func (r *SalesPersonRepositoryImpl) FindAllPaginated(req *models.PaginationReque
 	case "deleted":
 		query = query.Where(fmt.Sprintf("%s.deleted_at IS NOT NULL", spTable))
 	case "all":
+		// no filter
 	default:
 		query = query.Where(fmt.Sprintf("%s.deleted_at IS NULL", spTable))
 	}
@@ -113,14 +134,7 @@ func (r *SalesPersonRepositoryImpl) FindAllPaginated(req *models.PaginationReque
 		return nil, 0, HandleDatabaseError(err, "sales_person")
 	}
 
-	if req.Page <= 0 {
-		req.Page = 1
-	}
-	if req.Limit <= 0 {
-		req.Limit = 10
-	}
 	offset := (req.Page - 1) * req.Limit
-
 	listQ := query.
 		Offset(offset).
 		Limit(req.Limit).
@@ -137,95 +151,94 @@ func (r *SalesPersonRepositoryImpl) FindAllPaginated(req *models.PaginationReque
 	return salesPersons, totalCount, nil
 }
 
-func (r *SalesPersonRepositoryImpl) FindByEmail(email string) (*models.SalesPerson, error) {
-    var sp models.SalesPerson
-    err := r.DB.
-        Preload("Assignments").
-        Where("email = ?", email).
-        First(&sp).Error
+func (r *SalesPersonRepositoryImpl) FindByEmail(tx *gorm.DB, email string) (*models.SalesPerson, error) {
+	var sp models.SalesPerson
+	err := r.useDB(tx).
+		Preload("Assignments").
+		Where("email = ?", email).
+		First(&sp).Error
 
-    if err == nil {
-        return &sp, nil
-    }
-    if errors.Is(err, gorm.ErrRecordNotFound) {
-        return nil, ErrSalesPersonNotFound
-    }
-    return nil, HandleDatabaseError(err, "sales_person")
+	if err == nil {
+		return &sp, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrSalesPersonNotFound
+	}
+	return nil, HandleDatabaseError(err, "sales_person")
 }
 
-func (r *SalesPersonRepositoryImpl) FindById(salesPersonId string, isSoftDelete bool) (*models.SalesPerson, error) {
-	var salesPerson *models.SalesPerson
-	db := r.DB
-
-	if !isSoftDelete {
+func (r *SalesPersonRepositoryImpl) FindById(tx *gorm.DB, salesPersonId string, includeTrashed bool) (*models.SalesPerson, error) {
+	var sp models.SalesPerson
+	db := r.useDB(tx)
+	if includeTrashed {
 		db = db.Unscoped()
 	}
 
-	err := db.
-	 Preload("Assignments").
-		First(&salesPerson, "id = ?", salesPersonId).Error
-
-	if err != nil {
+	if err := db.
+		Preload("Assignments").
+		First(&sp, "id = ?", salesPersonId).Error; err != nil {
 		return nil, HandleDatabaseError(err, "sales_person")
 	}
-
-	return salesPerson, nil
+	return &sp, nil
 }
 
-func (r *SalesPersonRepositoryImpl) Insert(salesPerson *models.SalesPerson) (*models.SalesPerson, error) {
+// ---------- Mutations ----------
 
+func (r *SalesPersonRepositoryImpl) Insert(tx *gorm.DB, salesPerson *models.SalesPerson) (*models.SalesPerson, error) {
 	if salesPerson.ID == uuid.Nil {
 		return nil, fmt.Errorf("sales person ID cannot be empty")
 	}
-
-	if err := r.DB.Create(&salesPerson).Error; err != nil {
+	if err := r.useDB(tx).Create(salesPerson).Error; err != nil {
 		return nil, HandleDatabaseError(err, "sales_person")
 	}
 	return salesPerson, nil
 }
 
-func (r *SalesPersonRepositoryImpl) Update(salesPerson *models.SalesPerson) (*models.SalesPerson, error) {
-
+func (r *SalesPersonRepositoryImpl) Update(tx *gorm.DB, salesPerson *models.SalesPerson) (*models.SalesPerson, error) {
 	if salesPerson.ID == uuid.Nil {
 		return nil, fmt.Errorf("sales person ID cannot be empty")
 	}
-
-	if err := r.DB.Save(&salesPerson).Error; err != nil {
+	if err := r.useDB(tx).Save(salesPerson).Error; err != nil {
 		return nil, HandleDatabaseError(err, "sales_person")
 	}
 	return salesPerson, nil
 }
 
-func (r *SalesPersonRepositoryImpl) Delete(salesPersonId string, isHardDelete bool) error {
-	var salesPerson *models.SalesPerson
+func (r *SalesPersonRepositoryImpl) Delete(tx *gorm.DB, salesPersonId string, isHardDelete bool) error {
+	db := r.useDB(tx)
 
-	if err := r.DB.Unscoped().First(&salesPerson, "id = ?", salesPersonId).Error; err != nil {
+	var sp models.SalesPerson
+	if err := db.Unscoped().First(&sp, "id = ?", salesPersonId).Error; err != nil {
 		return HandleDatabaseError(err, "sales_person")
 	}
 
 	if isHardDelete {
-		if err := r.DB.Unscoped().Delete(&salesPerson).Error; err != nil {
+		if err := db.Unscoped().Delete(&sp).Error; err != nil {
 			return HandleDatabaseError(err, "sales_person")
 		}
 	} else {
-		if err := r.DB.Delete(&salesPerson).Error; err != nil {
+		if err := db.Delete(&sp).Error; err != nil {
 			return HandleDatabaseError(err, "sales_person")
 		}
 	}
 	return nil
 }
 
-func (r *SalesPersonRepositoryImpl) Restore(salesPerson *models.SalesPerson, salesPersonID string) (*models.SalesPerson, error) {
-	if err := r.DB.Unscoped().Model(salesPerson).Where("id = ?", salesPersonID).Update("deleted_at", nil).Error; err != nil {
-		return nil, err
+func (r *SalesPersonRepositoryImpl) Restore(tx *gorm.DB, salesPersonID string) (*models.SalesPerson, error) {
+	db := r.useDB(tx)
+
+	if err := db.Unscoped().
+		Model(&models.SalesPerson{}).
+		Where("id = ?", salesPersonID).
+		Update("deleted_at", nil).Error; err != nil {
+		return nil, HandleDatabaseError(err, "sales_person")
 	}
 
-	var restoredSalesPerson *models.SalesPerson
-	if err := r.DB.Unscoped().First(&restoredSalesPerson, "id = ?", salesPersonID).Error; err != nil {
-		return nil, err
+	var restored models.SalesPerson
+	if err := db.
+		Preload("Assignments").
+		First(&restored, "id = ?", salesPersonID).Error; err != nil {
+		return nil, HandleDatabaseError(err, "sales_person")
 	}
-	
-	return restoredSalesPerson, nil
+	return &restored, nil
 }
-
-

@@ -17,31 +17,34 @@ import (
 )
 
 type SalesOrderService struct {
-	SalesOrderRepository  repositories.SalesOrderRepository
-	SalesPersonRepository repositories.SalesPersonRepository
-	FacilityRepository    repositories.FacilityRepository
-	ItemRepository        repositories.ItemRepository
-	PaymentRepository     repositories.PaymentRepository
+	SalesOrderRepository    repositories.SalesOrderRepository
+	SalesPersonRepository   repositories.SalesPersonRepository
+	CustomerRepository      repositories.CustomerRepository
+	ItemRepository          repositories.ItemRepository
+	PaymentRepository       repositories.PaymentRepository
+	ItemHistoryRepository   repositories.ItemHistoryRepository
 }
 
 func NewSalesOrderService(
 	soRepo repositories.SalesOrderRepository,
 	spRepo repositories.SalesPersonRepository,
-	facilityRepo repositories.FacilityRepository,
+	customerRepo repositories.CustomerRepository,
 	itemRepo repositories.ItemRepository,
 	paymentRepo repositories.PaymentRepository,
+	itemHistoryRepo repositories.ItemHistoryRepository,
 ) *SalesOrderService {
 	return &SalesOrderService{
 		SalesOrderRepository:  soRepo,
 		SalesPersonRepository: spRepo,
-		FacilityRepository:    facilityRepo,
+		CustomerRepository:    customerRepo,
 		ItemRepository:        itemRepo,
 		PaymentRepository:     paymentRepo,
+		ItemHistoryRepository: itemHistoryRepo,
 	}
 }
 
 func (service *SalesOrderService) GetAllSalesOrders() ([]models.ResponseGetSalesOrder, error) {
-	sos, err := service.SalesOrderRepository.FindAll()
+	sos, err := service.SalesOrderRepository.FindAll(nil)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +53,6 @@ func (service *SalesOrderService) GetAllSalesOrders() ([]models.ResponseGetSales
 	for _, so := range sos {
 		sosResponse = append(sosResponse, service.mapSOToResponse(so))
 	}
-
 	return sosResponse, nil
 }
 
@@ -68,7 +70,7 @@ func (service *SalesOrderService) GetAllSalesOrdersPaginated(req *models.Paginat
 		req.Status = "active"
 	}
 
-	sos, totalCount, err := service.SalesOrderRepository.FindAllPaginated(req)
+	sos, totalCount, err := service.SalesOrderRepository.FindAllPaginated(nil, req)
 	if err != nil {
 		return nil, err
 	}
@@ -98,17 +100,16 @@ func (service *SalesOrderService) GetAllSalesOrdersPaginated(req *models.Paginat
 }
 
 func (service *SalesOrderService) GetSalesOrderByID(soId string) (*models.ResponseGetSalesOrder, error) {
-	so, err := service.SalesOrderRepository.FindById(soId, false)
+	so, err := service.SalesOrderRepository.FindById(nil, soId, false)
 	if err != nil {
 		return nil, err
 	}
-
-	response := service.mapSOToResponse(*so)
-	return &response, nil
+	resp := service.mapSOToResponse(*so)
+	return &resp, nil
 }
 
 func (service *SalesOrderService) GenerateDocumentDeliveryOrder(soId string) (string, []byte, error) {
-	so, err := service.SalesOrderRepository.FindById(soId, true)
+	so, err := service.SalesOrderRepository.FindById(nil, soId, true)
 	if err != nil {
 		return "", nil, fmt.Errorf("Sales order not found: %w", err)
 	}
@@ -119,7 +120,7 @@ func (service *SalesOrderService) GenerateDocumentDeliveryOrder(soId string) (st
 	}
 
 	if so.SOStatus == "Confirmed" {
-		if err := service.SalesOrderRepository.UpdateStatus(soId, "Shipped", ""); err != nil {
+		if err := service.SalesOrderRepository.UpdateStatus(nil, soId, "Shipped", ""); err != nil {
 			log.Printf("Failed to update Sales order status: %v", err)
 		}
 	}
@@ -128,7 +129,7 @@ func (service *SalesOrderService) GenerateDocumentDeliveryOrder(soId string) (st
 }
 
 func (service *SalesOrderService) GenerateInvoice(soId string) (string, []byte, error) {
-	so, err := service.SalesOrderRepository.FindById(soId, true)
+	so, err := service.SalesOrderRepository.FindById(nil, soId, true)
 	if err != nil {
 		return "", nil, fmt.Errorf("Sales order not found: %w", err)
 	}
@@ -142,7 +143,7 @@ func (service *SalesOrderService) GenerateInvoice(soId string) (string, []byte, 
 }
 
 func (service *SalesOrderService) GenerateReceipt(soId string) (string, []byte, error) {
-	so, err := service.SalesOrderRepository.FindById(soId, true)
+	so, err := service.SalesOrderRepository.FindById(nil, soId, true)
 	if err != nil {
 		return "", nil, fmt.Errorf("Sales order not found: %w", err)
 	}
@@ -161,13 +162,6 @@ func (service *SalesOrderService) CreateSalesOrder(
 ) (*models.SalesOrder, error) {
 	_ = userInfo
 
-	if _, err := service.SalesPersonRepository.FindById(soRequest.SalesPersonID.String(), false); err != nil {
-		return nil, errors.New("sales person not found")
-	}
-	if _, err := service.FacilityRepository.FindById(soRequest.FacilityID.String(), false); err != nil {
-		return nil, errors.New("facility not found")
-	}
-
 	tx := configs.DB.Begin()
 	if tx.Error != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
@@ -178,6 +172,17 @@ func (service *SalesOrderService) CreateSalesOrder(
 		}
 	}()
 
+	// validate master data di dalam tx
+	if _, err := service.SalesPersonRepository.FindById(tx, soRequest.SalesPersonID.String(), false); err != nil {
+		tx.Rollback()
+		return nil, errors.New("sales person not found")
+	}
+	if _, err := service.CustomerRepository.FindById(tx, soRequest.CustomerID.String(), false); err != nil {
+		tx.Rollback()
+		return nil, errors.New("customer not found")
+	}
+
+	// lock & cek stok
 	if err := service.validateAndLockStock(tx, soRequest.Items); err != nil {
 		tx.Rollback()
 		return nil, err
@@ -185,11 +190,14 @@ func (service *SalesOrderService) CreateSalesOrder(
 
 	var totalAmount int
 	soItems := make([]models.SalesOrderItem, 0, len(soRequest.Items))
+
 	for _, itemReq := range soRequest.Items {
-		if _, err := service.ItemRepository.FindById(itemReq.ItemID.String(), false); err != nil {
+		itemData, err := service.ItemRepository.FindById(tx, itemReq.ItemID.String(), false)
+		if err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf("item %s not found", itemReq.ItemID.String())
 		}
+
 		totalPrice := itemReq.Quantity * itemReq.UnitPrice
 		totalAmount += totalPrice
 
@@ -197,12 +205,13 @@ func (service *SalesOrderService) CreateSalesOrder(
 			ID:         uuid.New(),
 			ItemID:     itemReq.ItemID,
 			Quantity:   itemReq.Quantity,
+			UoMID:      itemData.UoMID,
 			UnitPrice:  itemReq.UnitPrice,
 			TotalPrice: totalPrice,
 		})
 	}
 
-	soNumber, err := service.SalesOrderRepository.GenerateNextSONumber()
+	soNumber, err := service.SalesOrderRepository.GenerateNextSONumber(tx)
 	if err != nil {
 		tx.Rollback()
 		return nil, fmt.Errorf("error generating SO number: %w", err)
@@ -217,7 +226,7 @@ func (service *SalesOrderService) CreateSalesOrder(
 		ID:               uuid.New(),
 		SONumber:         soNumber,
 		SalesPersonID:    soRequest.SalesPersonID,
-		FacilityID:       soRequest.FacilityID,
+		CustomerID:       soRequest.CustomerID,
 		SODate:           soRequest.SODate,
 		EstimatedArrival: soRequest.EstimatedArrival,
 		TermOfPayment:    soRequest.TermOfPayment,
@@ -230,7 +239,7 @@ func (service *SalesOrderService) CreateSalesOrder(
 		SalesOrderItems:  soItems,
 	}
 
-	if err := tx.Create(newSO).Error; err != nil {
+	if _, err := service.SalesOrderRepository.Insert(tx, newSO); err != nil {
 		tx.Rollback()
 		return nil, fmt.Errorf("error creating sales order: %w", err)
 	}
@@ -245,11 +254,13 @@ func (service *SalesOrderService) CreateSalesOrder(
 			PaymentMethod:"Pending",
 			Notes:        "Initial DP payment",
 		}
-		if err := tx.Create(dpPayment).Error; err != nil {
+		if _, err := service.PaymentRepository.Insert(tx, dpPayment); err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf("error creating DP payment: %w", err)
 		}
-		if err := tx.Model(newSO).Update("paid_amount", soRequest.DPAmount).Error; err != nil {
+
+		newSO.PaidAmount = soRequest.DPAmount
+		if _, err := service.SalesOrderRepository.Update(tx, newSO); err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf("error updating SO paid amount: %w", err)
 		}
@@ -259,7 +270,7 @@ func (service *SalesOrderService) CreateSalesOrder(
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	createdSO, err := service.SalesOrderRepository.FindById(newSO.ID.String(), false)
+	createdSO, err := service.SalesOrderRepository.FindById(nil, newSO.ID.String(), false)
 	if err != nil {
 		log.Printf("Warning: SO created but failed to fetch created data: %v", err)
 		return newSO, nil
@@ -272,14 +283,6 @@ func (service *SalesOrderService) UpdateSalesOrder(
 	soRequest *models.SalesOrderUpdateRequest,
 	userInfo *models.User,
 ) (*models.SalesOrder, error) {
-	so, err := service.SalesOrderRepository.FindById(soId, false)
-	if err != nil {
-		return nil, err
-	}
-	if so.SOStatus != "Draft" {
-		return nil, errors.New("can only update sales orders in Draft status")
-	}
-
 	tx := configs.DB.Begin()
 	if tx.Error != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
@@ -289,6 +292,16 @@ func (service *SalesOrderService) UpdateSalesOrder(
 			tx.Rollback()
 		}
 	}()
+
+	so, err := service.SalesOrderRepository.FindById(tx, soId, false)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if so.SOStatus != "Draft" {
+		tx.Rollback()
+		return nil, errors.New("can only update sales orders in Draft status")
+	}
 
 	if len(soRequest.Items) > 0 {
 		if err := service.validateAndLockStock(tx, soRequest.Items); err != nil {
@@ -300,19 +313,19 @@ func (service *SalesOrderService) UpdateSalesOrder(
 	updates := map[string]interface{}{}
 
 	if soRequest.SalesPersonID != uuid.Nil && soRequest.SalesPersonID != so.SalesPersonID {
-		if _, err := service.SalesPersonRepository.FindById(soRequest.SalesPersonID.String(), false); err != nil {
+		if _, err := service.SalesPersonRepository.FindById(tx, soRequest.SalesPersonID.String(), false); err != nil {
 			tx.Rollback()
 			return nil, errors.New("sales person not found")
 		}
 		updates["sales_person_id"] = soRequest.SalesPersonID
 	}
 
-	if soRequest.FacilityID != uuid.Nil && soRequest.FacilityID != so.FacilityID {
-		if _, err := service.FacilityRepository.FindById(soRequest.FacilityID.String(), false); err != nil {
+	if soRequest.CustomerID != uuid.Nil && soRequest.CustomerID != so.CustomerID {
+		if _, err := service.CustomerRepository.FindById(tx, soRequest.CustomerID.String(), false); err != nil {
 			tx.Rollback()
-			return nil, errors.New("facility not found")
+			return nil, errors.New("customer not found")
 		}
-		updates["facility_id"] = soRequest.FacilityID
+		updates["customer_id"] = soRequest.CustomerID
 	}
 
 	if !soRequest.SODate.IsZero() {
@@ -334,6 +347,7 @@ func (service *SalesOrderService) UpdateSalesOrder(
 		updates["notes"] = soRequest.Notes
 	}
 
+	// items
 	if len(soRequest.Items) > 0 {
 		var existingItems []models.SalesOrderItem
 		if err := tx.Where("sales_order_id = ?", so.ID).Find(&existingItems).Error; err != nil {
@@ -348,29 +362,44 @@ func (service *SalesOrderService) UpdateSalesOrder(
 
 		finalItems := make([]models.SalesOrderItem, 0, len(soRequest.Items))
 		seen := make(map[uuid.UUID]bool)
+
 		for _, req := range soRequest.Items {
-			if _, err := service.ItemRepository.FindById(req.ItemID.String(), false); err != nil {
+			itemData, err := service.ItemRepository.FindById(tx, req.ItemID.String(), false)
+			if err != nil {
 				tx.Rollback()
 				return nil, fmt.Errorf("item %s not found", req.ItemID.String())
 			}
 
 			if ex, ok := existingByItemID[req.ItemID]; ok {
-				changed := (ex.Quantity != req.Quantity) || (ex.UnitPrice != req.UnitPrice)
-				ex.Quantity = req.Quantity
-				ex.UnitPrice = req.UnitPrice
-				ex.TotalPrice = req.Quantity * req.UnitPrice
+				newQty := req.Quantity
+				newPrice := req.UnitPrice
+				newUoMID := itemData.UoMID
+				newTotal := newQty * newPrice
+
+				changed := (ex.Quantity != newQty) ||
+					(ex.UnitPrice != newPrice) ||
+					(ex.UoMID != newUoMID) ||
+					(ex.TotalPrice != newTotal)
+
+				ex.Quantity = newQty
+				ex.UnitPrice = newPrice
+				ex.UoMID = newUoMID
+				ex.TotalPrice = newTotal
+
 				if changed {
 					if err := tx.Model(&models.SalesOrderItem{}).
 						Where("id = ?", ex.ID).
 						Updates(map[string]interface{}{
 							"quantity":    ex.Quantity,
 							"unit_price":  ex.UnitPrice,
+							"uom_id":      ex.UoMID,
 							"total_price": ex.TotalPrice,
 						}).Error; err != nil {
 						tx.Rollback()
 						return nil, fmt.Errorf("error updating item %s: %w", ex.ID, err)
 					}
 				}
+
 				finalItems = append(finalItems, *ex)
 				seen[req.ItemID] = true
 			} else {
@@ -379,6 +408,7 @@ func (service *SalesOrderService) UpdateSalesOrder(
 					SalesOrderID: so.ID,
 					ItemID:       req.ItemID,
 					Quantity:     req.Quantity,
+					UoMID:        itemData.UoMID,
 					UnitPrice:    req.UnitPrice,
 					TotalPrice:   req.Quantity * req.UnitPrice,
 				}
@@ -393,7 +423,7 @@ func (service *SalesOrderService) UpdateSalesOrder(
 
 		for _, ex := range existingItems {
 			if !seen[ex.ItemID] {
-				if err := tx.Delete(&models.SalesOrderItem{}, "id = ?", ex.ID).Error; err != nil {
+				if err := tx.Unscoped().Delete(&models.SalesOrderItem{}, "id = ?", ex.ID).Error; err != nil {
 					tx.Rollback()
 					return nil, fmt.Errorf("error deleting removed item: %w", err)
 				}
@@ -407,6 +437,7 @@ func (service *SalesOrderService) UpdateSalesOrder(
 		updates["total_amount"] = total
 	}
 
+	// apply updates ke SO
 	if len(updates) > 0 {
 		if err := tx.Model(&models.SalesOrder{}).
 			Where("id = ?", so.ID).
@@ -420,7 +451,7 @@ func (service *SalesOrderService) UpdateSalesOrder(
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	updatedSO, err := service.SalesOrderRepository.FindById(so.ID.String(), false)
+	updatedSO, err := service.SalesOrderRepository.FindById(nil, so.ID.String(), false)
 	if err != nil {
 		log.Printf("Warning: SO updated but failed to fetch updated data: %v", err)
 		return so, nil
@@ -433,15 +464,6 @@ func (service *SalesOrderService) UpdateSalesOrderStatus(
 	statusRequest *models.SalesOrderStatusUpdateRequest,
 	userInfo *models.User,
 ) error {
-	so, err := service.SalesOrderRepository.FindById(soId, false)
-	if err != nil {
-		return err
-	}
-
-	if err := service.validateStatusTransition(so.SOStatus, statusRequest.SOStatus); err != nil {
-		return err
-	}
-
 	tx := configs.DB.Begin()
 	if tx.Error != nil {
 		return fmt.Errorf("failed to begin transaction: %w", tx.Error)
@@ -452,31 +474,39 @@ func (service *SalesOrderService) UpdateSalesOrderStatus(
 		}
 	}()
 
+	so, err := service.SalesOrderRepository.FindById(tx, soId, false)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	if err := service.validateStatusTransition(so.SOStatus, statusRequest.SOStatus); err != nil {
+		tx.Rollback()
+		return err
+	}
+
 	if statusRequest.SOStatus == "Delivered" {
 		for _, soItem := range so.SalesOrderItems {
-			var item models.Item
-			if err := tx.First(&item, "id = ?", soItem.ItemID).Error; err != nil {
+			item, err := service.ItemRepository.FindById(tx, soItem.ItemID.String(), false)
+			if err != nil {
 				tx.Rollback()
 				return fmt.Errorf("item not found: %w", err)
 			}
-
 			if item.Stock < soItem.Quantity {
 				tx.Rollback()
-				return fmt.Errorf(
-					"insufficient stock for item %s: available %d, required %d",
-					item.ID.String(), item.Stock, soItem.Quantity,
-				)
+				return fmt.Errorf("insufficient stock for item %s: available %d, required %d",
+					item.ID.String(), item.Stock, soItem.Quantity)
 			}
 
 			oldStock := item.Stock
 			item.Stock -= soItem.Quantity
 
-			if err := tx.Save(&item).Error; err != nil {
+			if _, err := service.ItemRepository.Update(tx, item); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("error updating stock for item %s: %w", item.ID, err)
 			}
 
-			if item.Stock <= item.LowStock {  
+			if item.Stock <= item.LowStock {
 				go func(it models.Item) {
 					metadata := map[string]interface{}{
 						"item_id":   it.ID.String(),
@@ -484,40 +514,23 @@ func (service *SalesOrderService) UpdateSalesOrderStatus(
 						"stock":     it.Stock,
 						"low_stock": it.LowStock,
 					}
-
 					title := fmt.Sprintf("Low Stock Alert: %s", it.Name)
-					message := fmt.Sprintf(
-						"Stock for item %s is low. Current: %d, Threshold: %d",
-						it.Name, it.Stock, it.LowStock,
-					)
-
-					if err := helpers.SendNotificationAuto(
-						"low_stock",
-						title,
-						message,
-						metadata,
-					); err != nil {
+					message := fmt.Sprintf("Stock for item %s is low. Current: %d, Threshold: %d", it.Name, it.Stock, it.LowStock)
+					if err := helpers.SendNotificationAuto("low_stock", title, message, metadata); err != nil {
 						fmt.Printf("failed to send low stock notification: %v\n", err)
 					}
-				}(item)
+				}(*item)
 			}
 
-			var lastStockHist models.ItemHistory
-			err := tx.
-				Where("item_id = ? AND change_type IN ?",
-					item.ID,
-					[]string{"create_stock", "update_stock"},
-				).
-				Order("created_at DESC").
-				Limit(1).
-				Find(&lastStockHist).Error
+			// history stok via repo tx-aware
+			lastHist, err := service.ItemHistoryRepository.FindLastByItem(tx, item.ID, "stock")
 			if err != nil {
 				tx.Rollback()
 				return fmt.Errorf("error querying last stock history: %w", err)
 			}
 
 			changeType := "update_stock"
-			if lastStockHist.ID == uuid.Nil {
+			if lastHist == nil {
 				changeType = "create_stock"
 				oldStock = 0
 			}
@@ -533,20 +546,14 @@ func (service *SalesOrderService) UpdateSalesOrderStatus(
 				CreatedBy:    &userInfo.ID,
 				UpdatedBy:    &userInfo.ID,
 			}
-
-			if err := tx.Create(&newHist).Error; err != nil {
+			if _, err := service.ItemHistoryRepository.Insert(tx, &newHist); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("error creating stock history for item %s: %w", item.ID, err)
 			}
 		}
 	}
 
-	if err := tx.Model(&models.SalesOrder{}).
-		Where("id = ?", so.ID).
-		Updates(map[string]interface{}{
-			"so_status":      statusRequest.SOStatus,
-			"payment_status": statusRequest.PaymentStatus,
-		}).Error; err != nil {
+	if err := service.SalesOrderRepository.UpdateStatus(tx, so.ID.String(), statusRequest.SOStatus, statusRequest.PaymentStatus); err != nil {
 		tx.Rollback()
 		return fmt.Errorf("error updating SO status: %w", err)
 	}
@@ -554,7 +561,6 @@ func (service *SalesOrderService) UpdateSalesOrderStatus(
 	if err := tx.Commit().Error; err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
-
 	return nil
 }
 
@@ -562,17 +568,46 @@ func (service *SalesOrderService) DeleteSalesOrders(req *models.SalesOrderIsHard
 	isHardDelete := req.IsHardDelete == "hardDelete"
 
 	for _, id := range req.IDs {
-		so, err := service.SalesOrderRepository.FindById(id.String(), true)
-		if err != nil {
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			return fmt.Errorf("failed to begin transaction for delete %s: %w", id.String(), tx.Error)
+		}
+		if _, err := service.SalesOrderRepository.FindById(tx, id.String(), true); err != nil {
+			tx.Rollback()
 			return fmt.Errorf("sales order %s not found: %w", id.String(), err)
 		}
 
-		if so.SOStatus != "Draft" && !isHardDelete {
-			return fmt.Errorf("can only soft delete sales orders in Draft status")
+		if !isHardDelete {
+			so, _ := service.SalesOrderRepository.FindById(tx, id.String(), true)
+			if so != nil && so.SOStatus != "Draft" {
+				tx.Rollback()
+				return fmt.Errorf("can only soft delete sales orders in Draft status")
+			}
 		}
 
-		if err := service.SalesOrderRepository.Delete(id.String(), isHardDelete); err != nil {
-			return fmt.Errorf("error deleting sales order %s: %w", id.String(), err)
+		if isHardDelete {
+			// hard-delete anak langsung via tx
+			if err := tx.Unscoped().Delete(&models.SalesOrderItem{}, "sales_order_id = ?", id).Error; err != nil {
+				tx.Rollback()
+				return fmt.Errorf("error hard deleting sales order items for %s: %w", id.String(), err)
+			}
+			if err := tx.Unscoped().Delete(&models.Payment{}, "sales_order_id = ?", id).Error; err != nil {
+				tx.Rollback()
+				return fmt.Errorf("error hard deleting payments for %s: %w", id.String(), err)
+			}
+			if err := service.SalesOrderRepository.Delete(tx, id.String(), true); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("error hard deleting sales order %s: %w", id.String(), err)
+			}
+		} else {
+			if err := service.SalesOrderRepository.Delete(tx, id.String(), false); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("error soft deleting sales order %s: %w", id.String(), err)
+			}
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			return fmt.Errorf("failed to commit delete %s: %w", id.String(), err)
 		}
 	}
 	return nil
@@ -580,15 +615,25 @@ func (service *SalesOrderService) DeleteSalesOrders(req *models.SalesOrderIsHard
 
 func (service *SalesOrderService) RestoreSalesOrders(req *models.SalesOrderRestoreRequest, userInfo *models.User) error {
 	for _, id := range req.IDs {
-		so := &models.SalesOrder{}
-		if _, err := service.SalesOrderRepository.Restore(so, id.String()); err != nil {
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			return fmt.Errorf("failed to begin transaction for restore %s: %w", id.String(), tx.Error)
+		}
+
+		if _, err := service.SalesOrderRepository.Restore(tx, id.String()); err != nil {
+			tx.Rollback()
 			return fmt.Errorf("error restoring sales order %s: %w", id.String(), err)
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			return fmt.Errorf("failed to commit restore %s: %w", id.String(), err)
 		}
 	}
 	return nil
 }
 
-// Helper functions
+// Helper types & funcs
+
 type stockViolation struct {
 	ItemID    uuid.UUID
 	ItemName  string
@@ -598,27 +643,27 @@ type stockViolation struct {
 
 func (service *SalesOrderService) mapSOToResponse(so models.SalesOrder) models.ResponseGetSalesOrder {
 	return models.ResponseGetSalesOrder{
-		ID:            so.ID,
-		SONumber:      so.SONumber,
-		SalesPersonID: so.SalesPersonID,
-		FacilityID:    so.FacilityID,
-		SODate:        so.SODate,
+		ID:               so.ID,
+		SONumber:         so.SONumber,
+		SalesPersonID:    so.SalesPersonID,
+		CustomerID:       so.CustomerID,
+		SODate:           so.SODate,
 		EstimatedArrival: so.EstimatedArrival,
-		TermOfPayment: so.TermOfPayment,
-		SOStatus:      so.SOStatus,
-		PaymentStatus: so.PaymentStatus,
-		TotalAmount:   so.TotalAmount,
-		PaidAmount:    so.PaidAmount,
-		DPAmount:      so.DPAmount,
-		DueDate:       so.DueDate,
-		Notes:         so.Notes,
-		CreatedAt:     so.CreatedAt,
-		UpdatedAt:     so.UpdatedAt,
-		DeletedAt:     so.DeletedAt,
-		SalesPerson:   so.SalesPerson,
-		Facility:      so.Facility,
-		Payments:      so.Payments,
-		SalesOrderItems: so.SalesOrderItems,
+		TermOfPayment:    so.TermOfPayment,
+		SOStatus:         so.SOStatus,
+		PaymentStatus:    so.PaymentStatus,
+		TotalAmount:      so.TotalAmount,
+		PaidAmount:       so.PaidAmount,
+		DPAmount:         so.DPAmount,
+		DueDate:          so.DueDate,
+		Notes:            so.Notes,
+		CreatedAt:        so.CreatedAt,
+		UpdatedAt:        so.UpdatedAt,
+		DeletedAt:        so.DeletedAt,
+		SalesPerson:      so.SalesPerson,
+		Customer:         so.Customer,
+		Payments:         so.Payments,
+		SalesOrderItems:  so.SalesOrderItems,
 	}
 }
 

@@ -2,12 +2,14 @@ package services
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 
+	"github.com/SalmanDMA/inventory-app/backend/src/configs"
 	"github.com/SalmanDMA/inventory-app/backend/src/helpers"
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
 	"github.com/gofiber/fiber/v2"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthService struct {
@@ -20,13 +22,23 @@ func NewAuthService(userRepo repositories.UserRepository) *AuthService {
 	}
 }
 
-func (service *AuthService) Login(userRequest *models.UserLoginRequest, ctx *fiber.Ctx) (*models.User, string, error) {
-	user, err := service.UserRepository.FindByEmailOrUsername(userRequest.Identifier)
+// ==============================
+// Reads (tanpa transaction)
+// ==============================
+
+func (s *AuthService) Login(in *models.UserLoginRequest, ctx *fiber.Ctx) (*models.User, string, error) {
+	_ = ctx
+
+	// read only
+	user, err := s.UserRepository.FindByEmailOrUsername(nil, in.Identifier)
 	if err != nil {
+		if err == repositories.ErrUserNotFound {
+			return nil, "", errors.New("invalid email or password")
+		}
 		return nil, "", err
 	}
 
-	if err := helpers.VerifyPassword(user.Password, userRequest.Password); err != nil {
+	if err := helpers.VerifyPassword(user.Password, in.Password); err != nil {
 		return nil, "", errors.New("invalid email or password")
 	}
 
@@ -34,13 +46,47 @@ func (service *AuthService) Login(userRequest *models.UserLoginRequest, ctx *fib
 	if err != nil {
 		return nil, "", err
 	}
-
 	return user, token, nil
 }
 
-func (service *AuthService) ResetPassword(userID string, currentPassword string, newPassword string, ctx *fiber.Ctx) error {
-	user, err := service.UserRepository.FindById(userID, false)
+func (s *AuthService) CheckIdentifier(in *models.UserCheckIdentifierRequest, ctx *fiber.Ctx) (*models.User, error) {
+	_ = ctx
+
+	// read only
+	user, err := s.UserRepository.FindByEmailOrUsername(nil, in.Identifier)
 	if err != nil {
+		if err == repositories.ErrUserNotFound {
+			return nil, errors.New("user not found")
+		}
+		return nil, err
+	}
+	return user, nil
+}
+
+// ==============================
+// Mutations (pakai transaction)
+// ==============================
+
+func (s *AuthService) ResetPassword(userID, currentPassword, newPassword string, ctx *fiber.Ctx) error {
+	_ = ctx
+
+	if newPassword == "" {
+		return errors.New("new password cannot be empty")
+	}
+
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return fmt.Errorf("failed to begin transaction: %w", tx.Error)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	user, err := s.UserRepository.FindById(tx, userID, false)
+	if err != nil {
+		tx.Rollback()
 		if err == repositories.ErrUserNotFound {
 			return errors.New("user not found")
 		}
@@ -48,57 +94,69 @@ func (service *AuthService) ResetPassword(userID string, currentPassword string,
 	}
 
 	if err := helpers.VerifyPassword(user.Password, currentPassword); err != nil {
+		tx.Rollback()
 		return errors.New("current password is incorrect")
 	}
 
-	if newPassword == "" {
-		return errors.New("new password cannot be empty")
-	}
-
-	passwordHash, err := helpers.HashPassword(newPassword)
+	hashed, err := helpers.HashPassword(newPassword)
 	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	user.Password = hashed
+
+	if _, err := s.UserRepository.Update(tx, user); err != nil {
+		tx.Rollback()
 		return err
 	}
 
-	user.Password = passwordHash
-
-	_, err = service.UserRepository.Update(user)
-	if err != nil {
-		return err
+	if err := tx.Commit().Error; err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
-
 	return nil
 }
 
-func (service *AuthService) CheckIdentifier(req *models.UserCheckIdentifierRequest, ctx *fiber.Ctx) (*models.User, error) {
-	user, err := service.UserRepository.FindByEmailOrUsername(req.Identifier)
+func (s *AuthService) ForgotPassword(in *models.UserForgotPasswordRequest, ctx *fiber.Ctx) (*models.User, error) {
+	_ = ctx
+
+	if strings.TrimSpace(in.Password) == "" {
+		return nil, errors.New("new password cannot be empty")
+	}
+
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	user, err := s.UserRepository.FindByEmailOrUsername(tx, in.Identifier)
 	if err != nil {
+		tx.Rollback()
 		if err == repositories.ErrUserNotFound {
 			return nil, errors.New("user not found")
 		}
 		return nil, err
 	}
 
-	return user, nil
-}
-
-func (service *AuthService) ForgotPassword(req *models.UserForgotPasswordRequest, ctx *fiber.Ctx) (*models.User, error) {
-	user, err := service.UserRepository.FindByEmailOrUsername(req.Identifier)
+	hashed, err := helpers.HashPassword(in.Password)
 	if err != nil {
-					return nil, errors.New("user not found")
+		tx.Rollback()
+		return nil, err
+	}
+	user.Password = hashed
+
+	updated, err := s.UserRepository.Update(tx, user)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-					return nil, err
+	if err := tx.Commit().Error; err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
-
-	user.Password = string(hashedPassword)
-
-	_, err = service.UserRepository.Update(user)
-	if err != nil {
-					return nil, err
-	}
-
-	return user, nil
+	return updated, nil
 }

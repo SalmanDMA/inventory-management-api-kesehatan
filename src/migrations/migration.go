@@ -18,11 +18,12 @@ func RunMigration() {
 		&models.Module{},
 		&models.RoleModule{},
 		&models.Category{},
+		&models.UoM{},
 		&models.Item{},
 		&models.ItemHistory{},
 		&models.Area{},
-		&models.FacilityType{},
-		&models.Facility{},
+		&models.CustomerType{},
+		&models.Customer{},
 		&models.SalesPerson{},
 		&models.SalesAssignment{},
 		&models.Supplier{},
@@ -90,6 +91,17 @@ func RunMigration() {
 	} else {
 		fmt.Println("Categories are already seeded")
 	}
+	
+	configs.DB.Model((&models.UoM{})).Count(&count)
+	if count == 0 {
+		if err := seeders.SeedUoMs(configs.DB); err != nil {
+			fmt.Println("Seeding UoMs failed:", err)
+		} else {
+			fmt.Println("Seeding UoMs successful")
+		}
+	} else {
+		fmt.Println("UoMs are already seeded")
+	}
 
 	configs.DB.Model((&models.Item{})).Count(&count)
 	if count == 0 {
@@ -113,15 +125,15 @@ func RunMigration() {
 		fmt.Println("Areas are already seeded")
 	}
 
-	configs.DB.Model((&models.Facility{})).Count(&count)
+	configs.DB.Model((&models.Customer{})).Count(&count)
 	if count == 0 {
-		if err := seeders.SeedFacilities(configs.DB); err != nil {
-			fmt.Println("Seeding facilities failed:", err)
+		if err := seeders.SeedCustomers(configs.DB); err != nil {
+			fmt.Println("Seeding customers failed:", err)
 		} else {
-			fmt.Println("Seeding facilities successful")
+			fmt.Println("Seeding customers successful")
 		}
 	} else {
-		fmt.Println("Facilities are already seeded")
+		fmt.Println("Customers are already seeded")
 	}
 
 	configs.DB.Model((&models.SalesPerson{})).Count(&count)
@@ -144,6 +156,17 @@ func RunMigration() {
 		}
 	} else {
 		fmt.Println("Suppliers are already seeded")
+	}
+
+	configs.DB.Model(&models.SalesOrder{}).Count(&count)
+	if count == 0 {
+		if err := seeders.SeedSalesOrders(configs.DB); err != nil {
+			fmt.Println("Seeding sales orders failed:", err)
+		} else {
+			fmt.Println("Seeding sales orders successful")
+		}
+	} else {
+		fmt.Println("Sales orders are already seeded")
 	}
 
 

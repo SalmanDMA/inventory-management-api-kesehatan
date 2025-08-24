@@ -4,10 +4,12 @@ import (
 	"errors"
 	"log"
 
+	"github.com/SalmanDMA/inventory-app/backend/src/configs"
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type ModuleTypeService struct {
@@ -15,141 +17,202 @@ type ModuleTypeService struct {
 }
 
 func NewModuleTypeService(moduleTypeRepository repositories.ModuleTypeRepository) *ModuleTypeService {
-	return &ModuleTypeService{ModuleTypeRepository: moduleTypeRepository}
+	return &ModuleTypeService{
+		ModuleTypeRepository: moduleTypeRepository,
+	}
 }
 
-func (service *ModuleTypeService) GetAllModuleTypes() ([]models.ResponseGetModuleType, error) {
-	moduleTypes, err := service.ModuleTypeRepository.FindAll()
+// ==============================
+// Reads (no tx required)
+// ==============================
 
+func (s *ModuleTypeService) GetAllModuleTypes() ([]models.ResponseGetModuleType, error) {
+	moduleTypes, err := s.ModuleTypeRepository.FindAll(nil)
 	if err != nil {
 		return nil, err
 	}
 
-	moduleTypesReponse := []models.ResponseGetModuleType{}
-
-	for _, moduleType := range moduleTypes {
-		moduleTypesReponse = append(moduleTypesReponse, models.ResponseGetModuleType{
-			ID:          moduleType.ID,
-			Icon:        moduleType.Icon,
-			Name:        moduleType.Name,
-			Description: moduleType.Description,
-			DeletedAt:   moduleType.DeletedAt,
+	resp := make([]models.ResponseGetModuleType, 0, len(moduleTypes))
+	for _, mt := range moduleTypes {
+		resp = append(resp, models.ResponseGetModuleType{
+			ID:          mt.ID,
+			Icon:        mt.Icon,
+			Name:        mt.Name,
+			Description: mt.Description,
+			DeletedAt:   mt.DeletedAt,
 		})
 	}
-
-	return moduleTypesReponse, nil
+	return resp, nil
 }
 
-func (service *ModuleTypeService) GetModuleTypeByID(moduleTypeId string) (*models.ResponseGetModuleType, error) {
-	moduleType, err := service.ModuleTypeRepository.FindById(moduleTypeId, false)
-
+func (s *ModuleTypeService) GetModuleTypeByID(moduleTypeId string) (*models.ResponseGetModuleType, error) {
+	mt, err := s.ModuleTypeRepository.FindById(nil, moduleTypeId, false)
 	if err != nil {
 		return nil, err
 	}
-
 	return &models.ResponseGetModuleType{
-		 ID:          moduleType.ID,
-			Name:        moduleType.Name,
-			Description: moduleType.Description,
-			Icon:        moduleType.Icon,
-			DeletedAt:   moduleType.DeletedAt,
+		ID:          mt.ID,
+		Name:        mt.Name,
+		Description: mt.Description,
+		Icon:        mt.Icon,
+		DeletedAt:   mt.DeletedAt,
 	}, nil
 }
 
+// ==============================
+// Mutations (transaction-aware; configs.DB.Begin())
+// ==============================
 
+func (s *ModuleTypeService) CreateModuleType(req *models.ModuleTypeCreateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.ModuleType, error) {
+	_ = ctx; _ = userInfo
 
-func (service *ModuleTypeService) CreateModuleType(moduleType *models.ModuleTypeCreateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.ModuleType, error) {
-	newModuleType := &models.ModuleType{
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	newMT := &models.ModuleType{
 		ID:          uuid.New(),
-		Name:        moduleType.Name,
-		Icon:        moduleType.Icon,
-		Description: moduleType.Description,
+		Name:        req.Name,
+		Icon:        req.Icon,
+		Description: req.Description,
 	}
 
-	createdModuleType, err := service.ModuleTypeRepository.Insert(newModuleType)
-
+	created, err := s.ModuleTypeRepository.Insert(tx, newMT)
 	if err != nil {
+		tx.Rollback()
 		return nil, err
 	}
 
-	return createdModuleType, nil
+	if err := tx.Commit().Error; err != nil {
+		return nil, err
+	}
+	return created, nil
 }
 
-func (service *ModuleTypeService) UpdateModuleType(moduleTypeId string, moduleTypeRequest *models.ModuleTypeUpdateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.ModuleType, error) {
-	moduleType, err := service.ModuleTypeRepository.FindById(moduleTypeId, false)
+func (s *ModuleTypeService) UpdateModuleType(moduleTypeId string, req *models.ModuleTypeUpdateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.ModuleType, error) {
+	_ = ctx; _ = userInfo
 
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	mt, err := s.ModuleTypeRepository.FindById(tx, moduleTypeId, false)
 	if err != nil {
+		tx.Rollback()
 		return nil, err
 	}
 
-	if moduleTypeRequest.Name != "" {
-		moduleType.Name = moduleTypeRequest.Name
+	if req.Name != "" {
+		mt.Name = req.Name
+	}
+	if req.Icon != "" {
+		mt.Icon = req.Icon
+	}
+	if req.Description != "" {
+		mt.Description = req.Description
 	}
 
-	if moduleTypeRequest.Icon != "" {
-		moduleType.Icon = moduleTypeRequest.Icon
-	}
-
-	if moduleTypeRequest.Description != "" {
-		moduleType.Description = moduleTypeRequest.Description
-	}
-
-	updatedModuleType, err := service.ModuleTypeRepository.Update(moduleType)
-
+	updated, err := s.ModuleTypeRepository.Update(tx, mt)
 	if err != nil {
+		tx.Rollback()
 		return nil, err
 	}
 
-	return updatedModuleType, nil
+	if err := tx.Commit().Error; err != nil {
+		return nil, err
+	}
+	return updated, nil
 }
 
+func (s *ModuleTypeService) DeleteModuleTypes(in *models.ModuleTypeIsHardDeleteRequest, ctx *fiber.Ctx, userInfo *models.User) error {
+	_ = ctx; _ = userInfo
 
-func (service *ModuleTypeService) DeleteModuleTypes(moduleTypeRequest *models.ModuleTypeIsHardDeleteRequest, ctx *fiber.Ctx, userInfo *models.User) error {
-	for _, moduleTypeId := range moduleTypeRequest.IDs {
-		_, err := service.ModuleTypeRepository.FindById(moduleTypeId.String(), false)
-		if err != nil {
-			if err == repositories.ErrModuleTypeNotFound {
-				log.Printf("ModuleType not found: %v\n", moduleTypeId)
+	if len(in.IDs) == 0 {
+		return errors.New("moduleTypeIds cannot be empty")
+	}
+	isHard := in.IsHardDelete == "hardDelete"
+
+	for _, id := range in.IDs {
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			log.Printf("Failed to begin transaction for moduleType %v: %v\n", id, tx.Error)
+			return errors.New("error beginning transaction")
+		}
+
+		if _, err := s.ModuleTypeRepository.FindById(tx, id.String(), true); err != nil {
+			tx.Rollback()
+			if err == repositories.ErrModuleTypeNotFound || errors.Is(err, gorm.ErrRecordNotFound) {
+				log.Printf("ModuleType not found: %v\n", id)
 				continue
 			}
-			log.Printf("Error finding moduleType %v: %v\n", moduleTypeId, err)
-			return errors.New("error finding usemoduleTyper")
+			log.Printf("Error finding moduleType %v: %v\n", id, err)
+			return errors.New("error finding moduleType")
 		}
 
-		if moduleTypeRequest.IsHardDelete == "hardDelete" {
-			if err := service.ModuleTypeRepository.Delete(moduleTypeId.String(), true); err != nil {
-				log.Printf("Error hard deleting moduleType %v: %v\n", moduleTypeId, err)
-				return errors.New("error hard deleting moduleType")
-			}
-		} else {
-			if err := service.ModuleTypeRepository.Delete(moduleTypeId.String(), false); err != nil {
-				log.Printf("Error soft deleting moduleType %v: %v\n", moduleTypeId, err)
-				return errors.New("error soft deleting moduleType")
-			}
+		if err := s.ModuleTypeRepository.Delete(tx, id.String(), isHard); err != nil {
+			tx.Rollback()
+			log.Printf("Error deleting moduleType %v: %v\n", id, err)
+			return errors.New("error deleting moduleType")
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			log.Printf("Error committing delete for moduleType %v: %v\n", id, err)
+			return errors.New("error committing delete")
 		}
 	}
-
 	return nil
 }
 
-func (service *ModuleTypeService) RestoreModuleTypes(moduleType *models.ModuleTypeRestoreRequest, ctx *fiber.Ctx, userInfo *models.User) ([]models.ModuleType, error) {
-	var restoredModuleTypes []models.ModuleType
+func (s *ModuleTypeService) RestoreModuleTypes(in *models.ModuleTypeRestoreRequest, ctx *fiber.Ctx, userInfo *models.User) ([]models.ModuleType, error) {
+	_ = ctx; _ = userInfo
 
-	for _, moduleTypeId := range moduleType.IDs {
-		moduleType := &models.ModuleType{ID: moduleTypeId}
+	if len(in.IDs) == 0 {
+		return nil, errors.New("moduleTypeIds cannot be empty")
+	}
 
-		restoredModuleType, err := service.ModuleTypeRepository.Restore(moduleType, moduleTypeId.String())
+	var restored []models.ModuleType
+	for _, id := range in.IDs {
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			log.Printf("Failed to begin transaction for moduleType restore %v: %v\n", id, tx.Error)
+			return nil, errors.New("error beginning transaction")
+		}
+
+		res, err := s.ModuleTypeRepository.Restore(tx, id.String())
 		if err != nil {
-			if err == repositories.ErrModuleTypeNotFound {
-				log.Printf("ModuleType not found: %v\n", moduleTypeId)
+			tx.Rollback()
+			if err == repositories.ErrModuleTypeNotFound || errors.Is(err, gorm.ErrRecordNotFound) {
+				log.Printf("ModuleType not found for restore: %v\n", id)
 				continue
 			}
-			log.Printf("Error restoring moduleType %v: %v\n", moduleTypeId, err)
+			log.Printf("Error restoring moduleType %v: %v\n", id, err)
 			return nil, errors.New("error restoring moduleType")
 		}
 
-		restoredModuleTypes = append(restoredModuleTypes, *restoredModuleType)
-	}
+		if err := tx.Commit().Error; err != nil {
+			log.Printf("Error committing moduleType restore %v: %v\n", id, err)
+			return nil, errors.New("error committing moduleType restore")
+		}
 
-	return restoredModuleTypes, nil
+		mt, ferr := s.ModuleTypeRepository.FindById(nil, res.ID.String(), true)
+		if ferr != nil {
+			log.Printf("Error fetching restored moduleType %v: %v\n", id, ferr)
+			continue
+		}
+		restored = append(restored, *mt)
+	}
+	return restored, nil
 }
+

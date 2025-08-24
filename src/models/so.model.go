@@ -11,7 +11,7 @@ type SalesOrder struct {
 	ID            uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	SONumber   string    `gorm:"uniqueIndex;not null" json:"so_number"`
 	SalesPersonID uuid.UUID `gorm:"type:uuid;not null" json:"sales_person_id"`
-	FacilityID    uuid.UUID `gorm:"type:uuid;not null" json:"facility_id"`
+	CustomerID    uuid.UUID `gorm:"type:uuid;not null" json:"customer_id"`
 	SODate     time.Time `gorm:"not null" json:"so_date"`
 	EstimatedArrival  *time.Time     `json:"estimated_arrival"`
 	TermOfPayment     string         `gorm:"not null" json:"term_of_payment"` // Full, DP, Tempo
@@ -28,7 +28,7 @@ type SalesOrder struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 
 	SalesPerson SalesPerson      `gorm:"foreignKey:SalesPersonID" json:"sales_person"`
-	Facility    Facility         `gorm:"foreignKey:FacilityID" json:"facility"`
+	Customer    Customer         `gorm:"foreignKey:CustomerID" json:"customer"`
 	SalesOrderItems       []SalesOrderItem `gorm:"foreignKey:SalesOrderID" json:"sales_order_items,omitempty"`
 	Payments    []Payment        `gorm:"foreignKey:SalesOrderID" json:"payments"`
 }
@@ -37,9 +37,10 @@ type SalesOrderItem struct {
 	ID           uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	SalesOrderID uuid.UUID `gorm:"type:uuid;not null" json:"sales_order_id"`
 	ItemID       uuid.UUID `gorm:"type:uuid;not null" json:"item_id"`
+	UoMID      uuid.UUID      `gorm:"column:uom_id;type:uuid;not null" json:"uom_id"`
 	Quantity     int       `gorm:"not null" json:"quantity"`
-	UnitPrice        int       `gorm:"not null" json:"unit_price"`
-	TotalPrice     int       `gorm:"not null" json:"total_price"`
+	UnitPrice    int       `gorm:"not null" json:"unit_price"`
+	TotalPrice   int       `gorm:"not null" json:"total_price"`
 
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
@@ -47,13 +48,14 @@ type SalesOrderItem struct {
 
 	SalesOrder SalesOrder `gorm:"foreignKey:SalesOrderID" json:"sales_order"`
 	Item       Item       `gorm:"foreignKey:ItemID" json:"item"`
+	UoM        UoM        `gorm:"foreignKey:UoMID" json:"uom"`
 }
 
 type ResponseGetSalesOrder struct {
 	ID            uuid.UUID             `json:"id"`
 	SONumber      string                `json:"so_number"`
 	SalesPersonID uuid.UUID             `json:"sales_person_id"`
-	FacilityID    uuid.UUID             `json:"facility_id"`
+	CustomerID    uuid.UUID             `json:"customer_id"`
 	SODate        time.Time             `json:"so_date"`
 	EstimatedArrival *time.Time         `json:"estimated_arrival"`
 	TermOfPayment string                `json:"term_of_payment"`
@@ -69,7 +71,7 @@ type ResponseGetSalesOrder struct {
 	DeletedAt     gorm.DeletedAt        `json:"deleted_at,omitempty"`
 
 	SalesPerson   SalesPerson `json:"sales_person"`
-	Facility      Facility    `json:"facility"`
+	Customer      Customer    `json:"customer"`
 	SalesOrderItems         []SalesOrderItem `json:"sales_order_items,omitempty"`
 	Payments      []Payment   `json:"payments,omitempty"`
 }
@@ -97,7 +99,7 @@ type SalesOrderItemRequest struct {
 
 type SalesOrderCreateRequest struct {
 	SalesPersonID    uuid.UUID               `json:"sales_person_id" validate:"required"`
-	FacilityID       uuid.UUID               `json:"facility_id" validate:"required"`
+	CustomerID       uuid.UUID               `json:"customer_id" validate:"required"`
 	SODate           time.Time               `json:"so_date" validate:"required"`
 	SOStatus         string                  `json:"so_status" validate:"required"`
 	EstimatedArrival *time.Time              `json:"estimated_arrival"`
@@ -110,7 +112,7 @@ type SalesOrderCreateRequest struct {
 
 type SalesOrderUpdateRequest struct {
 	SalesPersonID    uuid.UUID               `json:"sales_person_id"`
-	FacilityID       uuid.UUID               `json:"facility_id"`
+	CustomerID       uuid.UUID               `json:"customer_id"`
 	SODate           time.Time               `json:"so_date"`
 	EstimatedArrival *time.Time              `json:"estimated_arrival"`
 	TermOfPayment    string                  `json:"term_of_payment" validate:"omitempty,oneof=Full DP Tempo"`

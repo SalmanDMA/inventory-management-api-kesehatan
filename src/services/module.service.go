@@ -1,13 +1,16 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 
+	"github.com/SalmanDMA/inventory-app/backend/src/configs"
 	"github.com/SalmanDMA/inventory-app/backend/src/helpers"
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type ModuleService struct {
@@ -20,274 +23,366 @@ func NewModuleService(moduleRepository repositories.ModuleRepository) *ModuleSer
 	}
 }
 
-func (service *ModuleService) GetAllModules() ([]models.ResponseGetModule, error) {
-	modules, err := service.ModuleRepository.FindAll()
+// ==============================
+// Reads
+// ==============================
 
+func (s *ModuleService) GetAllModules() ([]models.ResponseGetModule, error) {
+	// default: hanya data aktif (tanpa soft-deleted) jika repo kamu punya varian FindAllActive(nil)
+	// sekarang tetap pakai FindAll(nil) sesuai implementasi yang ada
+	modules, err := s.ModuleRepository.FindAll(nil)
 	if err != nil {
 		return nil, err
 	}
 
-	modulesResponse := []models.ResponseGetModule{}
-
-	for _, module := range modules {
-		modulesResponse = append(modulesResponse, models.ResponseGetModule{
-			ID:          module.ID,
-			Name:       module.Name,
-			ParentID:    module.ParentID,
-			Parent:      module.Parent,
-			ModuleTypeID: module.ModuleTypeID,
-			ModuleType:  module.ModuleType,
-			Route:       module.Route,
-			Path:       module.Path,
-			Icon:        module.Icon,
-			Children: 		module.Children,
-			Description: module.Description,
-			RoleModules: module.RoleModules,
-			DeletedAt:   module.DeletedAt,
+	resp := make([]models.ResponseGetModule, 0, len(modules))
+	for _, m := range modules {
+		resp = append(resp, models.ResponseGetModule{
+			ID:           m.ID,
+			Name:         m.Name,
+			ParentID:     m.ParentID,
+			Parent:       m.Parent,
+			ModuleTypeID: m.ModuleTypeID,
+			ModuleType:   m.ModuleType,
+			Route:        m.Route,
+			Path:         m.Path,
+			Icon:         m.Icon,
+			Children:     m.Children,
+			Description:  m.Description,
+			RoleModules:  m.RoleModules,
+			DeletedAt:    m.DeletedAt,
 		})
 	}
-
-	return modulesResponse, nil
+	return resp, nil
 }
 
-func (service *ModuleService) CreateModule(moduleRequest *models.ModuleCreateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Module, error) {
-	var parentID *int
-	var parentName string
+// ==============================
+// Mutations (transaction-aware via configs.DB.Begin())
+// ==============================
 
-	if moduleRequest.ParentID != nil {
-		parentID = moduleRequest.ParentID
-		parentModule, err := service.ModuleRepository.FindById(*parentID, false)
-		if err != nil {
-			return nil, err
-		}
-		parentID = &parentModule.ID
-		parentName = parentModule.Name
+func (s *ModuleService) CreateModule(req *models.ModuleCreateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Module, error) {
+	_ = ctx; _ = userInfo
 
-		if parentName == "Root" {
-			parentID = nil
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("begin tx: %w", tx.Error)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			_ = tx.Rollback()
 		}
+	}()
+
+	parentID, err := s.resolveParentID(tx, req.ParentID)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, err
 	}
 
-	route, err := helpers.FormatRoute(moduleRequest.Route)
-	if err != nil {
-		return nil, err
+	route := req.Route
+	if route != "" {
+		route, err = helpers.FormatRoute(route)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
 	}
 
 	newModule := &models.Module{
-		Name:       helpers.CapitalizeTitle(moduleRequest.Name),
-		ParentID:    parentID,
-		ModuleTypeID: moduleRequest.ModuleTypeID,
-		Route:       route,
-		Path:       moduleRequest.Path,
-		Icon:      moduleRequest.Icon,
-		Description: moduleRequest.Description,
+		Name:         helpers.CapitalizeTitle(req.Name),
+		ParentID:     parentID,
+		ModuleTypeID: req.ModuleTypeID,
+		Route:        route,
+		Path:         req.Path,
+		Icon:         req.Icon,
+		Description:  req.Description,
 	}
 
-	createdModule, err := service.ModuleRepository.Insert(newModule)
+	created, err := s.ModuleRepository.Insert(tx, newModule)
 	if err != nil {
+		_ = tx.Rollback()
 		return nil, err
 	}
-	return createdModule, nil
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+	return created, nil
 }
 
-func (service *ModuleService) UpdateModule(moduleId int, moduleRequest *models.ModuleUpdateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Module, error) {
-	module, err := service.ModuleRepository.FindById(moduleId, true)
+func (s *ModuleService) UpdateModule(moduleId int, req *models.ModuleUpdateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Module, error) {
+	_ = ctx; _ = userInfo
+
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("begin tx: %w", tx.Error)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	m, err := s.ModuleRepository.FindById(tx, moduleId, true)
 	if err != nil {
-					return nil, err
+		_ = tx.Rollback()
+		return nil, err
 	}
 
-	var parentID *int
-	var parentName string
-
-	fmt.Println(moduleRequest, "moduleRequest")
-
-	if moduleRequest.ParentID != nil {
-					parentID = moduleRequest.ParentID
-					parentModule, err := service.ModuleRepository.FindById(*parentID, false)
-					if err != nil {
-									return nil, err
-					}
-					parentID = &parentModule.ID
-					parentName = parentModule.Name
-
-					if parentName == "Root" {
-									parentID = nil
-					}
+	// Parent handling
+	if req.ParentID != nil {
+		parentID, err := s.resolveParentID(tx, req.ParentID)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+		// Cegah siklus: parent tidak boleh menjadi descendant dari m
+		if parentID != nil {
+			isDescendant, err := s.isDescendant(tx, *parentID, m.ID)
+			if err != nil {
+				_ = tx.Rollback()
+				return nil, err
+			}
+			if isDescendant || *parentID == m.ID {
+				_ = tx.Rollback()
+				return nil, fmt.Errorf("invalid parent: cycle detected")
+			}
+		}
+		m.ParentID = parentID
+		m.Parent = nil
 	}
 
-	if moduleRequest.ModuleTypeID != uuid.Nil {
-					module.ModuleTypeID = moduleRequest.ModuleTypeID
+	// ModuleType
+	if req.ModuleTypeID != uuid.Nil {
+		m.ModuleTypeID = req.ModuleTypeID
 	}
-	
-	route, err := helpers.FormatRoute(moduleRequest.Route)
+
+	// Route
+	if req.Route != "" {
+		route, err := helpers.FormatRoute(req.Route)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+		m.Route = route
+	}
+
+	if req.Name != "" {
+		m.Name = helpers.CapitalizeTitle(req.Name)
+	}
+	if req.Path != "" {
+		m.Path = req.Path
+	}
+	if req.Icon != "" {
+		m.Icon = req.Icon
+	}
+	if req.Description != "" {
+		m.Description = req.Description
+	}
+
+	updated, err := s.ModuleRepository.Update(tx, m)
 	if err != nil {
-					return nil, err
+		_ = tx.Rollback()
+		return nil, err
 	}
 
-	if moduleRequest.Name != "" {
-					module.Name = helpers.CapitalizeTitle(moduleRequest.Name)
+	if err := tx.Commit().Error; err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
 	}
-
-	if moduleRequest.ParentID != nil {
-					module.ParentID = parentID
-					module.Parent = nil
-	}
-	
-	if moduleRequest.Route != "" {
-					module.Route = route
-	}
-
-	if moduleRequest.Path != "" {
-					module.Path = moduleRequest.Path
-	}
-
-	if moduleRequest.Icon != "" {
-					module.Icon = moduleRequest.Icon
-	}
-
-	if moduleRequest.Description != "" {
-					module.Description = moduleRequest.Description
-	}
-
-	fmt.Println(module, "module")
-
-	updatedModule, err := service.ModuleRepository.Update(module)
-	if err != nil {
-					return nil, err
-	}
-
-	return updatedModule, nil
+	return updated, nil
 }
 
-func (service *ModuleService) DeleteModule(moduleRequest *models.ModuleIsHardDeleteRequest, ctx *fiber.Ctx, userInfo *models.User) error {
+func (s *ModuleService) DeleteModule(req *models.ModuleIsHardDeleteRequest, ctx *fiber.Ctx, userInfo *models.User) error {
+	_ = ctx; _ = userInfo
 
-	if len(moduleRequest.IDs) == 0 {
-					return fmt.Errorf("moduleIds cannot be empty")
+	if len(req.IDs) == 0 {
+		return fmt.Errorf("moduleIds cannot be empty")
 	}
+	isHard := req.IsHardDelete == "hardDelete"
 
-	allModules, err := service.ModuleRepository.FindAll()
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return fmt.Errorf("begin tx: %w", tx.Error)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// Ambil semua module (Unscoped untuk bisa juga detach anak dari parent soft-deleted)
+	all, err := s.ModuleRepository.FindAll(tx)
 	if err != nil {
-					return fmt.Errorf("failed to retrieve all modules: %w", err)
+		_ = tx.Rollback()
+		return fmt.Errorf("get all modules: %w", err)
 	}
 
-	modulesToDelete := make(map[int]bool)
-	for _, moduleId := range moduleRequest.IDs {
-					modulesToDelete[moduleId] = true
+	toDelete := make(map[int]bool, len(req.IDs))
+	for _, id := range req.IDs {
+		toDelete[id] = true
 	}
 
-	var addModulesWithParentID func(parentID int)
-	addModulesWithParentID = func(parentID int) {
-					for _, module := range allModules {
-									if module.ParentID != nil && *module.ParentID == parentID {
-													if !modulesToDelete[module.ID] {
-																	modulesToDelete[module.ID] = true
-																	addModulesWithParentID(module.ID)
-													}
-									}
-					}
+	// Build adjacency list supaya collect O(n)
+	childrenMap := buildChildrenMap(all)
+	collectDescendants(toDelete, childrenMap)
+
+	// Detach anak yg parent-nya akan dihapus, tapi parent-nya tidak ikut dihapus
+	for i := range all {
+		m := &all[i]
+		if m.ParentID != nil && toDelete[m.ID] && !toDelete[*m.ParentID] {
+			m.ParentID = nil
+			if _, err := s.ModuleRepository.Update(tx, m); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
 	}
 
-	for _, module := range allModules {
-					if module.ParentID != nil && modulesToDelete[module.ID] {
-									parentID := *module.ParentID
-									if !modulesToDelete[parentID] {
-													module.ParentID = nil
-													if _, err := service.ModuleRepository.Update(&module); err != nil {
-																	return err
-													}
-									}
-					}
+	// Hapus
+	for id := range toDelete {
+		if _, err := s.ModuleRepository.FindById(tx, id, false); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err := s.ModuleRepository.Delete(tx, id, isHard); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
 	}
 
-	for moduleId := range modulesToDelete {
-					addModulesWithParentID(moduleId)
+	if err := tx.Commit().Error; err != nil {
+		return fmt.Errorf("commit tx: %w", err)
 	}
-
-	for moduleId := range modulesToDelete {
-					_, err := service.ModuleRepository.FindById(moduleId, false)
-
-					if err != nil {
-								return err
-					}
-
-					if moduleRequest.IsHardDelete == "hardDelete" {
-									if err := service.ModuleRepository.Delete(moduleId, true); err != nil {
-													return err
-									}
-					} else {
-									if err := service.ModuleRepository.Delete(moduleId, false); err != nil {
-													return err
-									}
-					}
-	}
-
 	return nil
 }
 
+func (s *ModuleService) RestoreModule(req *models.ModuleRestoreRequest, ctx *fiber.Ctx, userInfo *models.User) ([]models.Module, error) {
+	_ = ctx; _ = userInfo
 
-
-func (service *ModuleService) RestoreModule(moduleRequest *models.ModuleRestoreRequest, ctx *fiber.Ctx, userInfo *models.User) ([]models.Module, error) {
-	var restoredModules []models.Module
-
-	if len(moduleRequest.IDs) == 0 {
-					return nil, fmt.Errorf("moduleIds cannot be empty")
+	if len(req.IDs) == 0 {
+		return nil, fmt.Errorf("moduleIds cannot be empty")
 	}
 
-	allModules, err := service.ModuleRepository.FindAll()
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("begin tx: %w", tx.Error)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	all, err := s.ModuleRepository.FindAll(tx)
 	if err != nil {
-					return nil, fmt.Errorf("failed to retrieve all modules: %w", err)
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("get all modules: %w", err)
 	}
 
-	modulesToRestore := make(map[int]bool)
-	for _, moduleId := range moduleRequest.IDs {
-					modulesToRestore[moduleId] = true
+	toRestore := make(map[int]bool, len(req.IDs))
+	for _, id := range req.IDs {
+		toRestore[id] = true
 	}
 
-	var addModulesWithParentID func(parentID int)
-	addModulesWithParentID = func(parentID int) {
-					for _, module := range allModules {
-									if module.ParentID != nil && *module.ParentID == parentID {
-													if !modulesToRestore[module.ID] {
-																	modulesToRestore[module.ID] = true
-																	addModulesWithParentID(module.ID)
-													}
-									}
-					}
+	childrenMap := buildChildrenMap(all)
+	collectDescendants(toRestore, childrenMap)
+
+	for i := range all {
+		m := &all[i]
+		if m.ParentID != nil && toRestore[m.ID] && !toRestore[*m.ParentID] {
+			m.ParentID = nil
+			if _, err := s.ModuleRepository.Update(tx, m); err != nil {
+				_ = tx.Rollback()
+				return nil, err
+			}
+		}
 	}
 
-	for _, module := range allModules {
-					if module.ParentID != nil && modulesToRestore[module.ID] {
-									parentID := *module.ParentID
-									if !modulesToRestore[parentID] {
-													module.ParentID = nil
-													if _, err := service.ModuleRepository.Update(&module); err != nil {
-																	return nil, err
-													}
-									}
-					}
+	var restored []models.Module
+	for id := range toRestore {
+		got, err := s.ModuleRepository.Restore(tx, id)
+		if err != nil {
+			if errors.Is(err, repositories.ErrModuleNotFound) {
+				continue
+			}
+			_ = tx.Rollback()
+			return nil, err
+		}
+		restored = append(restored, *got)
 	}
 
-	for moduleId := range modulesToRestore {
-					addModulesWithParentID(moduleId)
+	if err := tx.Commit().Error; err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
 	}
-
-	for moduleId := range modulesToRestore {
-					module := &models.Module{
-									ID: moduleId,
-					}
-
-					restoredModule, err := service.ModuleRepository.Restore(module, moduleId)
-					if err != nil {
-									if err == repositories.ErrModuleNotFound {
-													continue
-									}
-									return nil, err
-					}
-
-					restoredModules = append(restoredModules, *restoredModule)
-	}
-
-	return restoredModules, nil
+	return restored, nil
 }
 
+// ==============================
+// Helpers
+// ==============================
 
+func (s *ModuleService) resolveParentID(tx *gorm.DB, reqParentID *int) (*int, error) {
+	if reqParentID == nil {
+		return nil, nil
+	}
+	parent, err := s.ModuleRepository.FindById(tx, *reqParentID, false)
+	if err != nil {
+		return nil, err
+	}
+	if parent != nil && parent.Name != "Root" {
+		id := parent.ID
+		return &id, nil
+	}
+	return nil, nil
+}
+
+func (s *ModuleService) isDescendant(tx *gorm.DB, candidateParent int, nodeId int) (bool, error) {
+	all, err := s.ModuleRepository.FindAll(tx)
+	if err != nil {
+		return false, err
+	}
+	childrenMap := buildChildrenMap(all)
+	stack := []int{nodeId}
+	seen := map[int]bool{nodeId: true}
+	for len(stack) > 0 {
+		cur := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		for _, ch := range childrenMap[cur] {
+			if ch == candidateParent {
+				return true, nil
+			}
+			if !seen[ch] {
+				seen[ch] = true
+				stack = append(stack, ch)
+			}
+		}
+	}
+	return false, nil
+}
+
+func buildChildrenMap(all []models.Module) map[int][]int {
+	mp := make(map[int][]int, len(all))
+	for _, m := range all {
+		if m.ParentID != nil {
+			mp[*m.ParentID] = append(mp[*m.ParentID], m.ID)
+		}
+	}
+	return mp
+}
+
+func collectDescendants(target map[int]bool, childrenMap map[int][]int) {
+	stack := make([]int, 0, len(target))
+	for id := range target {
+		stack = append(stack, id)
+	}
+	for len(stack) > 0 {
+		p := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		for _, child := range childrenMap[p] {
+			if !target[child] {
+				target[child] = true
+				stack = append(stack, child)
+			}
+		}
+	}
+}

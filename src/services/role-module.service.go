@@ -1,6 +1,9 @@
 package services
 
 import (
+	"fmt"
+
+	"github.com/SalmanDMA/inventory-app/backend/src/configs"
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
 	"github.com/gofiber/fiber/v2"
@@ -12,63 +15,87 @@ type RoleModuleService struct {
 	ModuleRepository     repositories.ModuleRepository
 }
 
-func NewRoleModuleService(roleModuleRepository repositories.RoleModuleRepository, moduleRepository repositories.ModuleRepository) *RoleModuleService {
+func NewRoleModuleService(
+	roleModuleRepository repositories.RoleModuleRepository,
+	moduleRepository repositories.ModuleRepository,
+) *RoleModuleService {
 	return &RoleModuleService{
-		RoleModuleRepository: roleModuleRepository, 
-		ModuleRepository: moduleRepository,
+		RoleModuleRepository: roleModuleRepository,
+		ModuleRepository:     moduleRepository,
 	}
 }
 
 func (s *RoleModuleService) GetAllRoleModule(roleID uuid.UUID) ([]models.ResponseGetRoleModule, error) {
-	roleModules, err := s.RoleModuleRepository.FindAll(roleID)
-
+	// read-only, tx boleh nil
+	roleModules, err := s.RoleModuleRepository.FindAll(nil, roleID)
 	if err != nil {
 		return nil, err
 	}
 
-	roleModulesResponse := []models.ResponseGetRoleModule{}
-
-	for _, roleModule := range roleModules {
-		roleModulesResponse = append(roleModulesResponse, models.ResponseGetRoleModule{
-			ID:        roleModule.ID,
-			RoleID:    roleModule.RoleID,
-			Role:      roleModule.Role,
-			ModuleID:  roleModule.ModuleID,
-			Module:    roleModule.Module,
-			Checked:   roleModule.Checked,
+	resp := make([]models.ResponseGetRoleModule, 0, len(roleModules))
+	for _, rm := range roleModules {
+		resp = append(resp, models.ResponseGetRoleModule{
+			ID:       rm.ID,
+			RoleID:   rm.RoleID,
+			Role:     rm.Role,
+			ModuleID: rm.ModuleID,
+			Module:   rm.Module,
+			Checked:  rm.Checked,
 		})
 	}
-
-	return roleModulesResponse, nil
+	return resp, nil
 }
 
-func (s *RoleModuleService) CreateOrUpdateRoleModule(roleId uuid.UUID, roleModuleRequest *models.RoleModuleRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.RoleModule, error) {
-	existingRoleModule, err := s.RoleModuleRepository.FindByRoleAndModule(roleId, roleModuleRequest.ModuleID)
+func (s *RoleModuleService) CreateOrUpdateRoleModule(
+	roleID uuid.UUID,
+	req *models.RoleModuleRequest,
+	ctx *fiber.Ctx,
+	userInfo *models.User,
+) (*models.RoleModule, error) {
+	_ = ctx
+	_ = userInfo
+
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// cek existing mapping dalam 1 tx
+	existing, err := s.RoleModuleRepository.FindByRoleAndModule(tx, roleID, req.ModuleID)
 	if err != nil {
+		_ = tx.Rollback()
 		return nil, err
 	}
 
 	var result *models.RoleModule
-
-	if existingRoleModule == nil {
-		newRoleModule := &models.RoleModule{
+	if existing == nil {
+		newRM := &models.RoleModule{
 			ID:       uuid.New(),
-			RoleID:   &roleId,
-			ModuleID: &roleModuleRequest.ModuleID,
-			Checked:  roleModuleRequest.Checked,
+			RoleID:   &roleID,
+			ModuleID: &req.ModuleID,
+			Checked:  req.Checked,
 		}
-		result, err = s.RoleModuleRepository.Insert(newRoleModule)
+		result, err = s.RoleModuleRepository.Insert(tx, newRM)
 		if err != nil {
+			_ = tx.Rollback()
 			return nil, err
 		}
 	} else {
-		existingRoleModule.Checked = roleModuleRequest.Checked
-		result, err = s.RoleModuleRepository.Update(existingRoleModule)
+		existing.Checked = req.Checked
+		result, err = s.RoleModuleRepository.Update(tx, existing)
 		if err != nil {
+			_ = tx.Rollback()
 			return nil, err
 		}
 	}
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
 	return result, nil
 }
-
-

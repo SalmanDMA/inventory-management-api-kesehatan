@@ -191,7 +191,8 @@ func SaveFile(ctx *fiber.Ctx, file *multipart.FileHeader, tableName string) (str
 	ext := strings.ToLower(filepath.Ext(file.Filename))
 	uniqueFileName := uuid.New().String() + ext
 	today := time.Now().Format("2006-01-02")
-	objectKey := fmt.Sprintf("%s/%s/%s/%s", tableName, today, category, uniqueFileName)
+	environment := os.Getenv("ENVIRONMENT")
+	objectKey := fmt.Sprintf("%s/%s/%s/%s/%s", environment, tableName, today, category, uniqueFileName)
 
 	if rs, ok := src.(io.ReadSeeker); ok {
 		_, _ = rs.Seek(0, io.SeekStart)
@@ -225,7 +226,7 @@ func SaveFile(ctx *fiber.Ctx, file *multipart.FileHeader, tableName string) (str
 		Bucket:         os.Getenv("MINIO_BUCKET_NAME"),
 	}
 
-	upload, err := repositories.NewUploadRepository(configs.DB).Insert(meta)
+	upload, err := repositories.NewUploadRepository(configs.DB).Insert(nil, meta)
 	if err != nil {
 		_ = configs.Minio.RemoveObject(context.Background(), os.Getenv("MINIO_BUCKET_NAME"), objectKey, minio.RemoveObjectOptions{})
 		return "", fmt.Errorf("failed to save upload metadata: %w", err)
@@ -236,7 +237,7 @@ func SaveFile(ctx *fiber.Ctx, file *multipart.FileHeader, tableName string) (str
 
 func DeleteLocalFileImmediate(uploadId string) error {
 	uploadRepo := repositories.NewUploadRepository(configs.DB)
-	upload, err := uploadRepo.FindById(uploadId, false)
+	upload, err := uploadRepo.FindById(nil, uploadId, false)
 	if err != nil {
 		return fmt.Errorf("failed to find upload: %w", err)
 	}
@@ -251,7 +252,7 @@ func DeleteLocalFileImmediate(uploadId string) error {
 		return fmt.Errorf("failed to delete object: %w", err)
 	}
 
-	if err := uploadRepo.Delete(uploadId, true); err != nil {
+	if err := uploadRepo.Delete(nil, uploadId, true); err != nil {
 		return fmt.Errorf("object deleted but failed to delete DB record: %w", err)
 	}
 	return nil

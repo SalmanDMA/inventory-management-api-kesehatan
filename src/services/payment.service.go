@@ -39,6 +39,8 @@ func (service *PaymentService) CreatePayment(
 	ctx *fiber.Ctx,
 	userInfo *models.User,
 ) (*models.Payment, error) {
+	_ = userInfo
+
 	if paymentRequest.OrderType != "PO" && paymentRequest.OrderType != "SO" {
 		return nil, errors.New("order_type must be either PO or SO")
 	}
@@ -53,15 +55,14 @@ func (service *PaymentService) CreatePayment(
 	}
 
 	var (
-		totalAmount    int
-		paidAmount     int
-		targetOrderID  uuid.UUID
-		updateErr error
+		totalAmount   int
+		paidAmount    int
+		targetOrderID uuid.UUID
 	)
 
 	switch paymentRequest.OrderType {
 	case "PO":
-		po, err := service.PurchaseOrderRepository.FindById(paymentRequest.PurchaseOrderID.String(), true)
+		po, err := service.PurchaseOrderRepository.FindById(nil, paymentRequest.PurchaseOrderID.String(), true)
 		if err != nil {
 			return nil, errors.New("purchase order not found")
 		}
@@ -70,10 +71,7 @@ func (service *PaymentService) CreatePayment(
 		targetOrderID = po.ID
 
 	case "SO":
-		if service.SalesOrderRepository == nil {
-			return nil, errors.New("sales order repository is not initialized")
-		}
-		so, err := service.SalesOrderRepository.FindById(paymentRequest.SalesOrderID.String(), true)
+		so, err := service.SalesOrderRepository.FindById(nil, paymentRequest.SalesOrderID.String(), true)
 		if err != nil {
 			return nil, errors.New("sales order not found")
 		}
@@ -82,12 +80,12 @@ func (service *PaymentService) CreatePayment(
 		targetOrderID = so.ID
 	}
 
-	remainingAmount := totalAmount - paidAmount
-	if paymentRequest.Amount > remainingAmount {
-		return nil, fmt.Errorf("payment amount (%d) exceeds remaining amount (%d)", paymentRequest.Amount, remainingAmount)
+	remaining := totalAmount - paidAmount
+	if paymentRequest.Amount > remaining {
+		return nil, fmt.Errorf("payment amount (%d) exceeds remaining amount (%d)", paymentRequest.Amount, remaining)
 	}
 
-	// --- Siapkan entitas Payment (set FK sesuai tipe) ---
+	// ---- Siapkan entity Payment
 	newPayment := &models.Payment{
 		ID:              uuid.New(),
 		OrderType:       paymentRequest.OrderType,
@@ -100,21 +98,20 @@ func (service *PaymentService) CreatePayment(
 	}
 	if paymentRequest.OrderType == "PO" {
 		newPayment.PurchaseOrderID = &paymentRequest.PurchaseOrderID
-		newPayment.SalesOrderID = nil
 	} else {
 		newPayment.SalesOrderID = &paymentRequest.SalesOrderID
-		newPayment.PurchaseOrderID = nil
 	}
 
-	// --- Transaksi ---
+	// ---- Transaksi
 	var invoiceUUIDStr string
+
 	tx := configs.DB.Begin()
 	if tx.Error != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			if invoiceUUIDStr != "" {
 				helpers.DeleteLocalFileImmediate(invoiceUUIDStr)
 			}
@@ -122,36 +119,40 @@ func (service *PaymentService) CreatePayment(
 	}()
 
 	if file, err := ctx.FormFile("invoice"); err == nil && file != nil {
-		locationSubdir := "purchase-orders/invoices"
+		subdir := "purchase-orders/invoices"
 		if paymentRequest.OrderType == "SO" {
-			locationSubdir = "sales-orders/invoices"
+			subdir = "sales-orders/invoices"
 		}
-		invoiceUUIDStr, updateErr = helpers.SaveFile(ctx, file, locationSubdir)
-		if updateErr != nil {
-			tx.Rollback()
-			return nil, fmt.Errorf("failed to save invoice: %w", updateErr)
+
+		uuidStr, err := helpers.SaveFile(ctx, file, subdir)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, fmt.Errorf("failed to save invoice: %w", err)
 		}
-		invoiceUUID, parseErr := uuid.Parse(invoiceUUIDStr)
-		if parseErr != nil {
-			tx.Rollback()
-			helpers.DeleteLocalFileImmediate(invoiceUUIDStr)
-			return nil, fmt.Errorf("invalid invoice UUID: %w", parseErr)
+		invoiceUUIDStr = uuidStr
+
+		invoiceID, err := uuid.Parse(uuidStr)
+		if err != nil {
+			_ = tx.Rollback()
+			helpers.DeleteLocalFileImmediate(uuidStr)
+			return nil, fmt.Errorf("invalid invoice UUID: %w", err)
 		}
-		newPayment.InvoiceID = &invoiceUUID
+		newPayment.InvoiceID = &invoiceID
 	}
 
-	if err := tx.Create(newPayment).Error; err != nil {
-		tx.Rollback()
+	createdPayment, err := service.PaymentRepository.Insert(tx, newPayment)
+	if err != nil {
+		_ = tx.Rollback()
 		if invoiceUUIDStr != "" {
 			helpers.DeleteLocalFileImmediate(invoiceUUIDStr)
 		}
 		return nil, fmt.Errorf("error creating payment: %w", err)
 	}
 
-	newPaidAmount := paidAmount + paymentRequest.Amount
-	newPaymentStatus := "Partial"
-	if newPaidAmount >= totalAmount {
-		newPaymentStatus = "Paid"
+	newPaid := paidAmount + paymentRequest.Amount
+	newPayStat := "Partial"
+	if newPaid >= totalAmount {
+		newPayStat = "Paid"
 	}
 
 	switch paymentRequest.OrderType {
@@ -159,10 +160,10 @@ func (service *PaymentService) CreatePayment(
 		if err := tx.Model(&models.PurchaseOrder{}).
 			Where("id = ?", targetOrderID).
 			Updates(map[string]interface{}{
-				"paid_amount":    newPaidAmount,
-				"payment_status": newPaymentStatus,
+				"paid_amount":    newPaid,
+				"payment_status": newPayStat,
 			}).Error; err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			if invoiceUUIDStr != "" {
 				helpers.DeleteLocalFileImmediate(invoiceUUIDStr)
 			}
@@ -173,10 +174,10 @@ func (service *PaymentService) CreatePayment(
 		if err := tx.Model(&models.SalesOrder{}).
 			Where("id = ?", targetOrderID).
 			Updates(map[string]interface{}{
-				"paid_amount":    newPaidAmount,
-				"payment_status": newPaymentStatus,
+				"paid_amount":    newPaid,
+				"payment_status": newPayStat,
 			}).Error; err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			if invoiceUUIDStr != "" {
 				helpers.DeleteLocalFileImmediate(invoiceUUIDStr)
 			}
@@ -184,7 +185,6 @@ func (service *PaymentService) CreatePayment(
 		}
 	}
 
-	// --- Commit ---
 	if err := tx.Commit().Error; err != nil {
 		if invoiceUUIDStr != "" {
 			helpers.DeleteLocalFileImmediate(invoiceUUIDStr)
@@ -192,76 +192,72 @@ func (service *PaymentService) CreatePayment(
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	// --- Ambil payment terbaru dari repo ---
-	createdPayment, err := service.PaymentRepository.FindById(newPayment.ID.String(), true)
+	fresh, err := service.PaymentRepository.FindById(nil, createdPayment.ID.String(), true)
 	if err != nil {
 		log.Printf("Warning: Payment created but failed to fetch created data: %v", err)
-		return newPayment, nil
+		return createdPayment, nil
 	}
-	return createdPayment, nil
+	return fresh, nil
 }
 
 func (service *PaymentService) GetPaymentsByPurchaseOrder(poId string) ([]models.ResponseGetPayment, error) {
-	payments, err := service.PaymentRepository.FindByPurchaseOrderId(poId)
+	payments, err := service.PaymentRepository.FindByPurchaseOrderId(nil, poId)
 	if err != nil {
 		return nil, err
 	}
 
-	var paymentsResponse []models.ResponseGetPayment
-	for _, payment := range payments {
-		paymentsResponse = append(paymentsResponse, models.ResponseGetPayment{
-			ID:              payment.ID,
-			OrderType:       payment.OrderType,
-			PurchaseOrderID: payment.PurchaseOrderID,
-			SalesOrderID:    payment.SalesOrderID,
-			PaymentType:     payment.PaymentType,
-			Amount:          payment.Amount,
-			PaymentDate:     payment.PaymentDate,
-			PaymentMethod:   payment.PaymentMethod,
-			ReferenceNumber: payment.ReferenceNumber,
-			InvoiceID:       payment.InvoiceID,
-			Notes:           payment.Notes,
-			CreatedAt:       payment.CreatedAt,
-			UpdatedAt:       payment.UpdatedAt,
-			DeletedAt:       payment.DeletedAt,
-			Invoice:         payment.Invoice,
-			PurchaseOrder:   payment.PurchaseOrder,
-			SalesOrder:      payment.SalesOrder,
+	resp := make([]models.ResponseGetPayment, 0, len(payments))
+	for _, p := range payments {
+		resp = append(resp, models.ResponseGetPayment{
+			ID:              p.ID,
+			OrderType:       p.OrderType,
+			PurchaseOrderID: p.PurchaseOrderID,
+			SalesOrderID:    p.SalesOrderID,
+			PaymentType:     p.PaymentType,
+			Amount:          p.Amount,
+			PaymentDate:     p.PaymentDate,
+			PaymentMethod:   p.PaymentMethod,
+			ReferenceNumber: p.ReferenceNumber,
+			InvoiceID:       p.InvoiceID,
+			Notes:           p.Notes,
+			CreatedAt:       p.CreatedAt,
+			UpdatedAt:       p.UpdatedAt,
+			DeletedAt:       p.DeletedAt,
+			Invoice:         p.Invoice,
+			PurchaseOrder:   p.PurchaseOrder,
+			SalesOrder:      p.SalesOrder,
 		})
 	}
-
-	return paymentsResponse, nil
+	return resp, nil
 }
 
 func (service *PaymentService) GetPaymentsBySalesOrder(soId string) ([]models.ResponseGetPayment, error) {
-	payments, err := service.PaymentRepository.FindBySalesOrderId(soId)
+	payments, err := service.PaymentRepository.FindBySalesOrderId(nil,soId)
 	if err != nil {
 		return nil, err
 	}
 
-	var paymentsResponse []models.ResponseGetPayment
-	for _, payment := range payments {
-		paymentsResponse = append(paymentsResponse, models.ResponseGetPayment{
-			ID:              payment.ID,
-			OrderType:       payment.OrderType,
-			PurchaseOrderID: payment.PurchaseOrderID,
-			SalesOrderID:    payment.SalesOrderID,
-			PaymentType:     payment.PaymentType,
-			Amount:          payment.Amount,
-			PaymentDate:     payment.PaymentDate,
-			PaymentMethod:   payment.PaymentMethod,
-			ReferenceNumber: payment.ReferenceNumber,
-			InvoiceID:       payment.InvoiceID,
-			Notes:           payment.Notes,
-			CreatedAt:       payment.CreatedAt,
-			UpdatedAt:       payment.UpdatedAt,
-			DeletedAt:       payment.DeletedAt,
-			Invoice:         payment.Invoice,
-			PurchaseOrder:   payment.PurchaseOrder,
-			SalesOrder:      payment.SalesOrder,
+	resp := make([]models.ResponseGetPayment, 0, len(payments))
+	for _, p := range payments {
+		resp = append(resp, models.ResponseGetPayment{
+			ID:              p.ID,
+			OrderType:       p.OrderType,
+			PurchaseOrderID: p.PurchaseOrderID,
+			SalesOrderID:    p.SalesOrderID,
+			PaymentType:     p.PaymentType,
+			Amount:          p.Amount,
+			PaymentDate:     p.PaymentDate,
+			PaymentMethod:   p.PaymentMethod,
+			ReferenceNumber: p.ReferenceNumber,
+			InvoiceID:       p.InvoiceID,
+			Notes:           p.Notes,
+			CreatedAt:       p.CreatedAt,
+			UpdatedAt:       p.UpdatedAt,
+			DeletedAt:       p.DeletedAt,
+			Invoice:         p.Invoice,
+			PurchaseOrder:   p.PurchaseOrder,
+			SalesOrder:      p.SalesOrder,
 		})
 	}
-
-	return paymentsResponse, nil
+	return resp, nil
 }
-

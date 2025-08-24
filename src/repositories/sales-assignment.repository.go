@@ -8,12 +8,20 @@ import (
 	"gorm.io/gorm"
 )
 
+// ==============================
+// Interface (transaction-aware)
+// ==============================
+
 type SalesAssignmentRepository interface {
-	FindAll(salesPersonID uuid.UUID) ([]models.SalesAssignment, error)
-	FindBySalesAndAreaID(salesPersonID uuid.UUID, areaID uuid.UUID) (*models.SalesAssignment, error)
-	Insert(roleModule *models.SalesAssignment) (*models.SalesAssignment, error)
-	Update(roleModule *models.SalesAssignment) (*models.SalesAssignment, error)
+	FindAll(tx *gorm.DB, salesPersonID uuid.UUID) ([]models.SalesAssignment, error)
+	FindBySalesAndAreaID(tx *gorm.DB, salesPersonID uuid.UUID, areaID uuid.UUID) (*models.SalesAssignment, error)
+	Insert(tx *gorm.DB, assignment *models.SalesAssignment) (*models.SalesAssignment, error)
+	Update(tx *gorm.DB, assignment *models.SalesAssignment) (*models.SalesAssignment, error)
 }
+
+// ==============================
+// Implementation
+// ==============================
 
 type SalesAssignmentRepositoryImpl struct {
 	DB *gorm.DB
@@ -23,48 +31,57 @@ func NewSalesAssignmentRepository(db *gorm.DB) *SalesAssignmentRepositoryImpl {
 	return &SalesAssignmentRepositoryImpl{DB: db}
 }
 
-func (r *SalesAssignmentRepositoryImpl) FindAll(salesPersonID uuid.UUID) ([]models.SalesAssignment, error) {
-	var salesPersons []models.SalesAssignment
+func (r *SalesAssignmentRepositoryImpl) useDB(tx *gorm.DB) *gorm.DB {
+	if tx != nil {
+		return tx
+	}
+	return r.DB
+}
 
-	err := r.DB.
+// ---------- Reads ----------
+
+func (r *SalesAssignmentRepositoryImpl) FindAll(tx *gorm.DB, salesPersonID uuid.UUID) ([]models.SalesAssignment, error) {
+	var assignments []models.SalesAssignment
+
+	if err := r.useDB(tx).
 		Preload("SalesPerson").
 		Preload("Area").
 		Where("sales_person_id = ?", salesPersonID).
-		Find(&salesPersons).Error
-
-	if err != nil {
+		Find(&assignments).Error; err != nil {
 		return nil, HandleDatabaseError(err, "sales_assignment")
 	}
-
-	return salesPersons, nil
+	return assignments, nil
 }
 
-func (r *SalesAssignmentRepositoryImpl) FindBySalesAndAreaID(salesPersonID uuid.UUID, areaID uuid.UUID) (*models.SalesAssignment, error) {
-	var roleModule models.SalesAssignment
-	err := r.DB.
-	Preload("SalesPerson").
-	Preload("Area").
-	Where("sales_person_id = ? AND area_id = ?", salesPersonID, areaID).
-	First(&roleModule).Error
+func (r *SalesAssignmentRepositoryImpl) FindBySalesAndAreaID(tx *gorm.DB, salesPersonID uuid.UUID, areaID uuid.UUID) (*models.SalesAssignment, error) {
+	var assignment models.SalesAssignment
+	err := r.useDB(tx).
+		Preload("SalesPerson").
+		Preload("Area").
+		Where("sales_person_id = ? AND area_id = ?", salesPersonID, areaID).
+		First(&assignment).Error
+
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, HandleDatabaseError(err, "sales_assignment")
 	}
-	return &roleModule, nil
+	return &assignment, nil
 }
 
-func (r *SalesAssignmentRepositoryImpl) Insert(roleModule *models.SalesAssignment) (*models.SalesAssignment, error) {
-	if err := r.DB.Create(&roleModule).Error; err != nil {
+// ---------- Mutations ----------
+
+func (r *SalesAssignmentRepositoryImpl) Insert(tx *gorm.DB, assignment *models.SalesAssignment) (*models.SalesAssignment, error) {
+	if err := r.useDB(tx).Create(assignment).Error; err != nil {
 		return nil, HandleDatabaseError(err, "sales_assignment")
 	}
-	return roleModule, nil
+	return assignment, nil
 }
 
-func (r *SalesAssignmentRepositoryImpl) Update(roleModule *models.SalesAssignment) (*models.SalesAssignment, error) {
-	if err := r.DB.Save(&roleModule).Error; err != nil {
+func (r *SalesAssignmentRepositoryImpl) Update(tx *gorm.DB, assignment *models.SalesAssignment) (*models.SalesAssignment, error) {
+	if err := r.useDB(tx).Save(assignment).Error; err != nil {
 		return nil, HandleDatabaseError(err, "sales_assignment")
 	}
-	return roleModule, nil
+	return assignment, nil
 }

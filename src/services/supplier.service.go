@@ -23,32 +23,33 @@ func NewSupplierService(supplierRepo repositories.SupplierRepository) *SupplierS
 	}
 }
 
-func (service *SupplierService) GetAllSuppliers() ([]models.ResponseGetSupplier, error) {
-	suppliers, err := service.SupplierRepository.FindAll()
+func (s *SupplierService) GetAllSuppliers() ([]models.ResponseGetSupplier, error) {
+	suppliers, err := s.SupplierRepository.FindAll(nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var suppliersResponse []models.ResponseGetSupplier
-	for _, supplier := range suppliers {
-		suppliersResponse = append(suppliersResponse, models.ResponseGetSupplier{
-			ID:            supplier.ID,
-			Name:          supplier.Name,
-			Code:          supplier.Code,
-			Email:         supplier.Email,
-			Phone:         supplier.Phone,
-			Address:       supplier.Address,
-			ContactPerson: supplier.ContactPerson,
-			CreatedAt:     supplier.CreatedAt,
-			UpdatedAt:     supplier.UpdatedAt,
-			DeletedAt:     supplier.DeletedAt,
+	out := make([]models.ResponseGetSupplier, 0, len(suppliers))
+	for _, sp := range suppliers {
+		out = append(out, models.ResponseGetSupplier{
+			ID:            sp.ID,
+			Name:          sp.Name,
+			Code:          sp.Code,
+			Email:         sp.Email,
+			Phone:         sp.Phone,
+			Address:       sp.Address,
+			ContactPerson: sp.ContactPerson,
+			CreatedAt:     sp.CreatedAt,
+			UpdatedAt:     sp.UpdatedAt,
+			DeletedAt:     sp.DeletedAt,
 		})
 	}
-
-	return suppliersResponse, nil
+	return out, nil
 }
 
-func (service *SupplierService) GetAllSuppliersPaginated(req *models.PaginationRequest, userInfo *models.User) (*models.SupplierPaginatedResponse, error) {
+func (s *SupplierService) GetAllSuppliersPaginated(req *models.PaginationRequest, userInfo *models.User) (*models.SupplierPaginatedResponse, error) {
+	_ = userInfo
+
 	if req.Page <= 0 {
 		req.Page = 1
 	}
@@ -62,67 +63,62 @@ func (service *SupplierService) GetAllSuppliersPaginated(req *models.PaginationR
 		req.Status = "active"
 	}
 
-	suppliers, totalCount, err := service.SupplierRepository.FindAllPaginated(req)
+	rows, total, err := s.SupplierRepository.FindAllPaginated(nil, req)
 	if err != nil {
 		return nil, err
 	}
 
-	suppliersResponse := []models.ResponseGetSupplier{}
-	for _, supplier := range suppliers {
-		suppliersResponse = append(suppliersResponse, models.ResponseGetSupplier{
-			ID:            supplier.ID,
-			Name:          supplier.Name,
-			Code:          supplier.Code,
-			Email:         supplier.Email,
-			Phone:         supplier.Phone,
-			Address:       supplier.Address,
-			ContactPerson: supplier.ContactPerson,
-			CreatedAt:     supplier.CreatedAt,
-			UpdatedAt:     supplier.UpdatedAt,
-			DeletedAt:     supplier.DeletedAt,
+	data := make([]models.ResponseGetSupplier, 0, len(rows))
+	for _, sp := range rows {
+		data = append(data, models.ResponseGetSupplier{
+			ID:            sp.ID,
+			Name:          sp.Name,
+			Code:          sp.Code,
+			Email:         sp.Email,
+			Phone:         sp.Phone,
+			Address:       sp.Address,
+			ContactPerson: sp.ContactPerson,
+			CreatedAt:     sp.CreatedAt,
+			UpdatedAt:     sp.UpdatedAt,
+			DeletedAt:     sp.DeletedAt,
 		})
 	}
 
-	totalPages := int((totalCount + int64(req.Limit) - 1) / int64(req.Limit))
-	hasNext := req.Page < totalPages
-	hasPrev := req.Page > 1
-
-	paginationResponse := models.PaginationResponse{
-		CurrentPage:  req.Page,
-		PerPage:      req.Limit,
-		TotalPages:   totalPages,
-		TotalRecords: totalCount,
-		HasNext:      hasNext,
-		HasPrev:      hasPrev,
-	}
-
+	totalPages := int((total + int64(req.Limit) - 1) / int64(req.Limit))
 	return &models.SupplierPaginatedResponse{
-		Data:       suppliersResponse,
-		Pagination: paginationResponse,
+		Data: data,
+		Pagination: models.PaginationResponse{
+			CurrentPage:  req.Page,
+			PerPage:      req.Limit,
+			TotalPages:   totalPages,
+			TotalRecords: total,
+			HasNext:      req.Page < totalPages,
+			HasPrev:      req.Page > 1,
+		},
 	}, nil
 }
 
-func (service *SupplierService) GetSupplierByID(supplierId string) (*models.ResponseGetSupplier, error) {
-	supplier, err := service.SupplierRepository.FindById(supplierId, false)
+func (s *SupplierService) GetSupplierByID(supplierId string) (*models.ResponseGetSupplier, error) {
+	sp, err := s.SupplierRepository.FindById(nil, supplierId, false)
 	if err != nil {
 		return nil, err
 	}
 
 	return &models.ResponseGetSupplier{
-		ID:            supplier.ID,
-		Name:          supplier.Name,
-		Code:          supplier.Code,
-		Email:         supplier.Email,
-		Phone:         supplier.Phone,
-		Address:       supplier.Address,
-		ContactPerson: supplier.ContactPerson,
-		CreatedAt:     supplier.CreatedAt,
-		UpdatedAt:     supplier.UpdatedAt,
-		DeletedAt:     supplier.DeletedAt,
+		ID:            sp.ID,
+		Name:          sp.Name,
+		Code:          sp.Code,
+		Email:         sp.Email,
+		Phone:         sp.Phone,
+		Address:       sp.Address,
+		ContactPerson: sp.ContactPerson,
+		CreatedAt:     sp.CreatedAt,
+		UpdatedAt:     sp.UpdatedAt,
+		DeletedAt:     sp.DeletedAt,
 	}, nil
 }
 
-func (service *SupplierService) CreateSupplier(req *models.SupplierCreateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Supplier, error) {
+func (s *SupplierService) CreateSupplier(req *models.SupplierCreateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Supplier, error) {
 	_ = ctx
 	_ = userInfo
 
@@ -130,28 +126,27 @@ func (service *SupplierService) CreateSupplier(req *models.SupplierCreateRequest
 
 	name := norm(req.Name)
 	code := norm(req.Code)
-
 	if name == "" || code == "" {
 		return nil, errors.New("name and code are required")
 	}
-
 	if len(name) > 150 || len(code) > 30 {
 		return nil, errors.New("name/code exceeds max length")
 	}
 
+	// normalisasi optional fields
 	if req.Email != nil {
-		email := strings.TrimSpace(*req.Email)
-		if email == "" {
+		e := strings.TrimSpace(*req.Email)
+		if e == "" {
 			req.Email = nil
-		} else if !repositories.IsValidEmail(email) {
+		} else if !repositories.IsValidEmail(e) {
 			return nil, errors.New("invalid email")
 		} else {
-			req.Email = &email
+			req.Email = &e
 		}
 	}
 	if req.Phone != nil {
 		p := strings.TrimSpace(*req.Phone)
-		if p == "" { 
+		if p == "" {
 			req.Phone = nil
 		} else {
 			req.Phone = &p
@@ -174,41 +169,70 @@ func (service *SupplierService) CreateSupplier(req *models.SupplierCreateRequest
 		}
 	}
 
-	if _, err := service.SupplierRepository.FindByName(name); err == nil {
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("begin tx: %w", tx.Error)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Uniqueness check dalam tx
+	if _, err := s.SupplierRepository.FindByName(tx, name); err == nil {
+		tx.Rollback()
 		return nil, errors.New("supplier with this name already exists")
-	} else if err != repositories.ErrSupplierNotFound {
-		return nil, errors.New("error checking supplier: " + err.Error())
+	} else if !errors.Is(err, repositories.ErrSupplierNotFound) {
+		tx.Rollback()
+		return nil, fmt.Errorf("check supplier name failed: %w", err)
 	}
 
-	if _, err := service.SupplierRepository.FindByCode(code); err == nil {
+	if _, err := s.SupplierRepository.FindByCode(tx, code); err == nil {
+		tx.Rollback()
 		return nil, errors.New("supplier with this code already exists")
-	} else if err != repositories.ErrSupplierNotFound {
-		return nil, errors.New("error checking supplier: " + err.Error())
+	} else if !errors.Is(err, repositories.ErrSupplierNotFound) {
+		tx.Rollback()
+		return nil, fmt.Errorf("check supplier code failed: %w", err)
 	}
 
-	newSupplier := &models.Supplier{
+	entity := &models.Supplier{
 		ID:            uuid.New(),
-		Name:          req.Name,
-		Code:          req.Code,
+		Name:          name, // simpan versi normalized untuk unik
+		Code:          code,
 		Email:         req.Email,
 		Phone:         req.Phone,
 		Address:       req.Address,
 		ContactPerson: req.ContactPerson,
 	}
 
-	result, err := service.SupplierRepository.Insert(newSupplier)
+	inserted, err := s.SupplierRepository.Insert(tx, entity)
 	if err != nil {
+		tx.Rollback()
+		if repositories.IsUniqueViolation(err) {
+			return nil, errors.New("supplier already exists")
+		}
 		return nil, fmt.Errorf("error creating supplier: %w", err)
 	}
 
-	return result, nil
+	if err := tx.Commit().Error; err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+
+	// fetch ulang (di luar tx) kalau butuh preload
+	out, err := s.SupplierRepository.FindById(nil, inserted.ID.String(), false)
+	if err != nil {
+		return inserted, nil
+	}
+	return out, nil
 }
 
-func (service *SupplierService) UpdateSupplier(idStr string, upd *models.SupplierUpdateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Supplier, error) {
+func (s *SupplierService) UpdateSupplier(idStr string, upd *models.SupplierUpdateRequest, ctx *fiber.Ctx, userInfo *models.User) (*models.Supplier, error) {
 	_ = ctx
 	_ = userInfo
 
-	existing, err := service.SupplierRepository.FindById(idStr, false)
+	// ambil dulu di luar tx
+	cur, err := s.SupplierRepository.FindById(nil, idStr, false)
 	if err != nil {
 		if errors.Is(err, repositories.ErrSupplierNotFound) {
 			return nil, errors.New("supplier not found")
@@ -218,163 +242,180 @@ func (service *SupplierService) UpdateSupplier(idStr string, upd *models.Supplie
 
 	norm := func(v string) string { return strings.ToLower(strings.TrimSpace(v)) }
 
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("begin tx: %w", tx.Error)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// code
 	if strings.TrimSpace(upd.Code) != "" {
 		newCode := norm(upd.Code)
 		if len(newCode) > 30 {
+			tx.Rollback()
 			return nil, errors.New("code exceeds max length")
 		}
-		if newCode != existing.Code {
-			if ex, err := service.SupplierRepository.FindByCode(newCode); err == nil && ex.ID != existing.ID {
+		if newCode != cur.Code {
+			if ex, err := s.SupplierRepository.FindByCode(tx, newCode); err == nil && ex.ID != cur.ID {
+				tx.Rollback()
 				return nil, errors.New("supplier code already exists")
-			} else if err != nil && !errors.Is(err, repositories.ErrSalesPersonNotFound) {
+			} else if err != nil && !errors.Is(err, repositories.ErrSupplierNotFound) {
+				tx.Rollback()
 				return nil, fmt.Errorf("check code failed: %w", err)
 			}
-			existing.Code = newCode
+			cur.Code = newCode
 		}
 	}
 
+	// name
 	if strings.TrimSpace(upd.Name) != "" {
 		newName := norm(upd.Name)
 		if len(newName) > 150 {
+			tx.Rollback()
 			return nil, errors.New("name exceeds max length")
 		}
-		if newName != existing.Name {
-			if ex, err := service.SupplierRepository.FindByName(newName); err == nil && ex.ID != existing.ID {
+		if newName != cur.Name {
+			if ex, err := s.SupplierRepository.FindByName(tx, newName); err == nil && ex.ID != cur.ID {
+				tx.Rollback()
 				return nil, errors.New("supplier name already exists")
-			} else if err != nil && !errors.Is(err, repositories.ErrSalesPersonNotFound) {
+			} else if err != nil && !errors.Is(err, repositories.ErrSupplierNotFound) {
+				tx.Rollback()
 				return nil, fmt.Errorf("check name failed: %w", err)
 			}
-			existing.Name = newName
+			cur.Name = newName
 		}
 	}
 
+	// optional fields
 	if upd.Address != nil {
 		a := strings.TrimSpace(*upd.Address)
 		if a == "" {
-			existing.Address = nil
+			cur.Address = nil
 		} else {
-			existing.Address = &a
+			cur.Address = &a
 		}
 	}
 	if upd.Phone != nil {
 		p := strings.TrimSpace(*upd.Phone)
 		if p == "" {
-			existing.Phone = nil
+			cur.Phone = nil
 		} else {
-			existing.Phone = &p
+			cur.Phone = &p
 		}
 	}
 	if upd.Email != nil {
 		e := strings.TrimSpace(*upd.Email)
 		if e == "" {
-			existing.Email = nil
+			cur.Email = nil
 		} else if !repositories.IsValidEmail(e) {
+			tx.Rollback()
 			return nil, errors.New("invalid email")
 		} else {
-			existing.Email = &e
+			cur.Email = &e
 		}
 	}
-
 	if upd.ContactPerson != nil {
 		cp := strings.TrimSpace(*upd.ContactPerson)
 		if cp == "" {
-			existing.ContactPerson = nil
+			cur.ContactPerson = nil
 		} else {
-			existing.ContactPerson = &cp
+			cur.ContactPerson = &cp
 		}
 	}
 
-	result, err := service.SupplierRepository.Update(existing)
+	updated, err := s.SupplierRepository.Update(tx, cur)
 	if err != nil {
+		tx.Rollback()
+		if repositories.IsUniqueViolation(err) {
+			return nil, errors.New("supplier already exists")
+		}
 		return nil, fmt.Errorf("error updating supplier: %w", err)
 	}
 
-	return result, nil
+	if err := tx.Commit().Error; err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+
+	out, err := s.SupplierRepository.FindById(nil, updated.ID.String(), false)
+	if err != nil {
+		return updated, nil
+	}
+	return out, nil
 }
 
-func (service *SupplierService) DeleteSuppliers(supplierRequest *models.SupplierIsHardDeleteRequest, ctx *fiber.Ctx, userInfo *models.User) error {
-	for _, supplierId := range supplierRequest.IDs {
+func (s *SupplierService) DeleteSuppliers(req *models.SupplierIsHardDeleteRequest, ctx *fiber.Ctx, userInfo *models.User) error {
+	_ = ctx
+	_ = userInfo
+
+	for _, id := range req.IDs {
 		tx := configs.DB.Begin()
 		if tx.Error != nil {
-			log.Printf("Failed to begin transaction for supplier %v: %v\n", supplierId, tx.Error)
+			log.Printf("Failed to begin transaction for supplier %v: %v\n", id, tx.Error)
 			return errors.New("error beginning transaction")
 		}
 
-		_, err := service.SupplierRepository.FindById(supplierId.String(), true)
-		if err != nil {
+		if _, err := s.SupplierRepository.FindById(tx, id.String(), true); err != nil {
 			tx.Rollback()
-			if err == repositories.ErrSupplierNotFound {
-				log.Printf("Supplier not found: %v\n", supplierId)
+			if errors.Is(err, repositories.ErrSupplierNotFound) {
+				log.Printf("Supplier not found: %v\n", id)
 				continue
 			}
-			log.Printf("Error finding supplier %v: %v\n", supplierId, err)
+			log.Printf("Error finding supplier %v: %v\n", id, err)
 			return errors.New("error finding supplier")
 		}
 
-		if supplierRequest.IsHardDelete == "hardDelete" {
-				if err := tx.Unscoped().Delete(&models.Supplier{}, "id = ?", supplierId).Error; err != nil {
-					tx.Rollback()
-					log.Printf("Error hard deleting supplier %v: %v\n", supplierId, err)
-					return errors.New("error hard deleting supplier")
-				}
-
-				if err := tx.Commit().Error; err != nil {
-					log.Printf("Error committing hard delete for supplier %v: %v\n", supplierId, err)
-					return errors.New("error committing hard delete")
-				}
-		} else {
-			if err := tx.Delete(&models.Supplier{}, "id = ?", supplierId).Error; err != nil {
-				tx.Rollback()
-				log.Printf("Error soft deleting supplier %v: %v\n", supplierId, err)
-				return errors.New("error soft deleting supplier")
-			}
-
-			if err := tx.Commit().Error; err != nil {
-				log.Printf("Error committing soft delete for supplier %v: %v\n", supplierId, err)
-				return errors.New("error committing soft delete")
-			}
-		}
-	}
-
-	return nil
-}
-
-func (service *SupplierService) RestoreSuppliers(supplierRequest *models.SupplierRestoreRequest, ctx *fiber.Ctx, userInfo *models.User) ([]models.Supplier, error) {
-	var restoredSuppliers []models.Supplier
-
-	for _, supplierId := range supplierRequest.IDs {
-		tx := configs.DB.Begin()
-		if tx.Error != nil {
-			log.Printf("Failed to begin transaction for supplier restore %v: %v\n", supplierId, tx.Error)
-			return nil, errors.New("error beginning transaction")
-		}
-
-		result := tx.Model(&models.Supplier{}).Unscoped().Where("id = ?", supplierId).Update("deleted_at", nil)
-		if result.Error != nil {
+		if err := s.SupplierRepository.Delete(tx, id.String(), req.IsHardDelete == "hardDelete"); err != nil {
 			tx.Rollback()
-			log.Printf("Error restoring supplier %v: %v\n", supplierId, result.Error)
-			return nil, errors.New("error restoring supplier")
-		}
-
-		if result.RowsAffected == 0 {
-			tx.Rollback()
-			log.Printf("Supplier not found for restore: %v\n", supplierId)
-			continue
+			log.Printf("Error deleting supplier %v: %v\n", id, err)
+			return errors.New("error deleting supplier")
 		}
 
 		if err := tx.Commit().Error; err != nil {
-			log.Printf("Error committing supplier restore %v: %v\n", supplierId, err)
+			log.Printf("Error committing delete for supplier %v: %v\n", id, err)
+			return errors.New("error committing delete")
+		}
+	}
+	return nil
+}
+
+func (s *SupplierService) RestoreSuppliers(req *models.SupplierRestoreRequest, ctx *fiber.Ctx, userInfo *models.User) ([]models.Supplier, error) {
+	_ = ctx
+	_ = userInfo
+
+	var restored []models.Supplier
+	for _, id := range req.IDs {
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			log.Printf("Failed to begin transaction for supplier restore %v: %v\n", id, tx.Error)
+			return nil, errors.New("error beginning transaction")
+		}
+
+		sp := &models.Supplier{ID: id}
+		if _, err := s.SupplierRepository.Restore(tx, id.String()); err != nil {
+			tx.Rollback()
+			if errors.Is(err, repositories.ErrSupplierNotFound) {
+				log.Printf("Supplier not found for restore: %v\n", id)
+				continue
+			}
+			log.Printf("Error restoring supplier %v: %v\n", id, err)
+			return nil, errors.New("error restoring supplier")
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			log.Printf("Error committing supplier restore %v: %v\n", id, err)
 			return nil, errors.New("error committing supplier restore")
 		}
 
-		restoredSupplier, err := service.SupplierRepository.FindById(supplierId.String(), true)
+		row, err := s.SupplierRepository.FindById(nil, id.String(), true)
 		if err != nil {
-			log.Printf("Error fetching restored supplier %v: %v\n", supplierId, err)
+			restored = append(restored, *sp)
 			continue
 		}
-
-		restoredSuppliers = append(restoredSuppliers, *restoredSupplier)
+		restored = append(restored, *row)
 	}
-
-	return restoredSuppliers, nil
+	return restored, nil
 }

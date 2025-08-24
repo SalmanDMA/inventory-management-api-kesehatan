@@ -31,7 +31,7 @@ func JWTProtected(ctx *fiber.Ctx) error {
 	}
 
 	userRepo := repositories.NewUserRepository(configs.DB)
-	user, err := userRepo.FindByEmailOrUsername(claims.Email)
+	user, err := userRepo.FindByEmailOrUsername(nil, claims.Email)
 	if err != nil {
 		log.Printf("User fetch error: %v", err)
 		return helpers.Response(ctx, fiber.StatusInternalServerError, "Internal server error", nil)

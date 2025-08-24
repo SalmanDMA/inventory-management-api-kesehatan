@@ -8,12 +8,20 @@ import (
 	"gorm.io/gorm"
 )
 
+// ==============================
+// Interface (transaction-aware)
+// ==============================
+
 type RoleModuleRepository interface {
-	FindAll(roleID uuid.UUID) ([]models.RoleModule, error)
-	FindByRoleAndModule(roleID uuid.UUID, moduleID int) (*models.RoleModule, error)
-	Insert(roleModule *models.RoleModule) (*models.RoleModule, error)
-	Update(roleModule *models.RoleModule) (*models.RoleModule, error)
+	FindAll(tx *gorm.DB, roleID uuid.UUID) ([]models.RoleModule, error)
+	FindByRoleAndModule(tx *gorm.DB, roleID uuid.UUID, moduleID int) (*models.RoleModule, error)
+	Insert(tx *gorm.DB, roleModule *models.RoleModule) (*models.RoleModule, error)
+	Update(tx *gorm.DB, roleModule *models.RoleModule) (*models.RoleModule, error)
 }
+
+// ==============================
+// Implementation
+// ==============================
 
 type RoleModuleRepositoryImpl struct {
 	DB *gorm.DB
@@ -23,49 +31,57 @@ func NewRoleModuleRepository(db *gorm.DB) *RoleModuleRepositoryImpl {
 	return &RoleModuleRepositoryImpl{DB: db}
 }
 
-func (r *RoleModuleRepositoryImpl) FindAll(roleID uuid.UUID) ([]models.RoleModule, error) {
-	var roleModules []models.RoleModule
+func (r *RoleModuleRepositoryImpl) useDB(tx *gorm.DB) *gorm.DB {
+	if tx != nil {
+		return tx
+	}
+	return r.DB
+}
 
-	err := r.DB.
+// ---------- Reads ----------
+
+func (r *RoleModuleRepositoryImpl) FindAll(tx *gorm.DB, roleID uuid.UUID) ([]models.RoleModule, error) {
+	var roleModules []models.RoleModule
+	if err := r.useDB(tx).
 		Preload("Role").
 		Preload("Module").
 		Preload("Module.ModuleType").
 		Where("role_id = ?", roleID).
-		Find(&roleModules).Error
-
-	if err != nil {
+		Find(&roleModules).Error; err != nil {
 		return nil, HandleDatabaseError(err, "role_module")
 	}
-
 	return roleModules, nil
 }
 
-func (r *RoleModuleRepositoryImpl) FindByRoleAndModule(roleID uuid.UUID, moduleID int) (*models.RoleModule, error) {
-	var roleModule models.RoleModule
-	err := r.DB.
-	Preload("Role").
-	Preload("Module").
-	Preload("Module.ModuleType").
-	Where("role_id = ? AND module_id = ?", roleID, moduleID).
-	First(&roleModule).Error
+func (r *RoleModuleRepositoryImpl) FindByRoleAndModule(tx *gorm.DB, roleID uuid.UUID, moduleID int) (*models.RoleModule, error) {
+	var rm models.RoleModule
+	err := r.useDB(tx).
+		Preload("Role").
+		Preload("Module").
+		Preload("Module.ModuleType").
+		Where("role_id = ? AND module_id = ?", roleID, moduleID).
+		First(&rm).Error
+
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, HandleDatabaseError(err, "role_module")
 	}
-	return &roleModule, nil
+	return &rm, nil
 }
 
-func (r *RoleModuleRepositoryImpl) Insert(roleModule *models.RoleModule) (*models.RoleModule, error) {
-	if err := r.DB.Create(&roleModule).Error; err != nil {
+// ---------- Mutations ----------
+
+func (r *RoleModuleRepositoryImpl) Insert(tx *gorm.DB, roleModule *models.RoleModule) (*models.RoleModule, error) {
+	if err := r.useDB(tx).Create(roleModule).Error; err != nil {
 		return nil, HandleDatabaseError(err, "role_module")
 	}
 	return roleModule, nil
 }
 
-func (r *RoleModuleRepositoryImpl) Update(roleModule *models.RoleModule) (*models.RoleModule, error) {
-	if err := r.DB.Save(&roleModule).Error; err != nil {
+func (r *RoleModuleRepositoryImpl) Update(tx *gorm.DB, roleModule *models.RoleModule) (*models.RoleModule, error) {
+	if err := r.useDB(tx).Save(roleModule).Error; err != nil {
 		return nil, HandleDatabaseError(err, "role_module")
 	}
 	return roleModule, nil

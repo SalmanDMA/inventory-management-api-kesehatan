@@ -11,39 +11,40 @@ import (
 	"github.com/jung-kurt/gofpdf"
 )
 
-func formatIDR(n int) string {
-	s := strconv.FormatInt(int64(n), 10)
-	neg := false
-	if strings.HasPrefix(s, "-") {
-		neg = true
-		s = s[1:]
-	}
-	var chunks []string
-	for len(s) > 3 {
-		chunks = append([]string{s[len(s)-3:]}, chunks...)
-		s = s[:len(s)-3]
-	}
-	if s != "" {
-		chunks = append([]string{s}, chunks...)
-	}
-	out := strings.Join(chunks, ".")
-	if neg {
-		out = "-" + out
-	}
-	return out
-}
-
-func GenerateInvoicePDF(so *models.SalesOrder) (string, []byte, error) {
+func GenerateDeliveryOrderPDF(so *models.SalesOrder) (string, []byte, error) {
 	pdf := gofpdf.New("P", "mm", "A4", "")
 	pdf.SetAutoPageBreak(true, 15)
 	pdf.AddPage()
 
+	// Format angka Indonesia: 1.234.567
+	formatIDR := func(n int) string {
+		s := strconv.FormatInt(int64(n), 10)
+		neg := false
+		if strings.HasPrefix(s, "-") {
+			neg = true
+			s = s[1:]
+		}
+		var chunks []string
+		for len(s) > 3 {
+			chunks = append([]string{s[len(s)-3:]}, chunks...)
+			s = s[:len(s)-3]
+		}
+		if s != "" {
+			chunks = append([]string{s}, chunks...)
+		}
+		out := strings.Join(chunks, ".")
+		if neg {
+			out = "-" + out
+		}
+		return out
+	}
+
 	// === Header ===
 	pdf.SetFont("Arial", "B", 18)
-	pdf.Cell(0, 10, "INVOICE")
+	pdf.Cell(0, 10, "DELIVERY ORDER")
 	pdf.Ln(12)
 
-	// helper row
+	// Helper row writer
 	row := func(label, val string) {
 		pdf.SetFont("Arial", "B", 11)
 		pdf.Cell(45, 7, label)
@@ -54,31 +55,26 @@ func GenerateInvoicePDF(so *models.SalesOrder) (string, []byte, error) {
 
 	// === Meta Info ===
 	pdf.SetFont("Arial", "", 11)
-	invoiceNo := fmt.Sprintf("INV-%s", so.SONumber)
-	row("Invoice Number:", invoiceNo)
-	row("Invoice Date:", time.Now().Format("02 January 2006"))
-	row("SO Reference:", so.SONumber)
-	row("SO Status:", so.SOStatus)
-	row("Term of Payment:", so.TermOfPayment)
-	if so.DueDate != nil {
-		row("Due Date:", so.DueDate.Format("02 January 2006"))
-	}
+	row("DO Number:", so.SONumber) // sementara pakai SO Number
+	row("DO Date:", so.SODate.Format("02 January 2006"))
+	row("Sales Order Ref:", so.SONumber)
+	row("Status:", so.SOStatus)
 	pdf.Ln(4)
 
-	// === Bill To / Facility ===
-	if so.Facility.ID.String() != "00000000-0000-0000-0000-000000000000" {
+	// === Customer Info ===
+	if so.Customer.ID.String() != "00000000-0000-0000-0000-000000000000" {
 		pdf.SetFont("Arial", "B", 13)
-		pdf.Cell(0, 8, "Bill To")
+		pdf.Cell(0, 8, "Customer")
 		pdf.Ln(9)
 
-		row("Name:", so.Facility.Name)
-		if v := so.Facility.Email; v != nil {
+		row("Name:", so.Customer.Name)
+		if v := so.Customer.Email; v != nil {
 			row("Email:", *v)
 		}
-		if v := so.Facility.Phone; v != nil {
+		if v := so.Customer.Phone; v != nil {
 			row("Phone:", *v)
 		}
-		if v := so.Facility.Address; v != nil {
+		if v := so.Customer.Address; v != nil {
 			pdf.SetFont("Arial", "B", 11)
 			pdf.Cell(45, 7, "Address:")
 			pdf.SetFont("Arial", "", 11)
@@ -91,7 +87,7 @@ func GenerateInvoicePDF(so *models.SalesOrder) (string, []byte, error) {
 	if len(so.SalesOrderItems) > 0 {
 		pdf.Ln(2)
 		pdf.SetFont("Arial", "B", 13)
-		pdf.Cell(0, 8, "Invoice Items")
+		pdf.Cell(0, 8, "Items Delivered")
 		pdf.Ln(10)
 
 		colNo := 10.0
@@ -100,7 +96,7 @@ func GenerateInvoicePDF(so *models.SalesOrder) (string, []byte, error) {
 		colPrice := 35.0
 		colSubtotal := 35.0
 
-		// header
+		// Header
 		pdf.SetFont("Arial", "B", 10)
 		pdf.SetFillColor(240, 240, 240)
 		pdf.CellFormat(colNo, 8, "No", "1", 0, "C", true, 0, "")
@@ -110,7 +106,7 @@ func GenerateInvoicePDF(so *models.SalesOrder) (string, []byte, error) {
 		pdf.CellFormat(colSubtotal, 8, "Subtotal", "1", 0, "C", true, 0, "")
 		pdf.Ln(8)
 
-		// rows
+		// Rows
 		pdf.SetFont("Arial", "", 9)
 		var grandTotal int
 		for i, it := range so.SalesOrderItems {
@@ -132,32 +128,10 @@ func GenerateInvoicePDF(so *models.SalesOrder) (string, []byte, error) {
 			pdf.Ln(8)
 		}
 
-		// summary (subtotal / dp / paid / remaining)
+		// Total summary row
 		pdf.SetFont("Arial", "B", 10)
-		pdf.CellFormat(colNo+colName+colQty+colPrice, 8, "Subtotal", "1", 0, "R", true, 0, "")
+		pdf.CellFormat(colNo+colName+colQty+colPrice, 8, "Total", "1", 0, "R", true, 0, "")
 		pdf.CellFormat(colSubtotal, 8, "Rp "+formatIDR(grandTotal), "1", 0, "R", true, 0, "")
-		pdf.Ln(8)
-
-		if so.DPAmount > 0 {
-			pdf.SetFont("Arial", "", 10)
-			pdf.CellFormat(colNo+colName+colQty+colPrice, 8, "Down Payment (DP)", "1", 0, "R", false, 0, "")
-			pdf.CellFormat(colSubtotal, 8, "- Rp "+formatIDR(so.DPAmount), "1", 0, "R", false, 0, "")
-			pdf.Ln(8)
-		}
-
-		if so.PaidAmount > 0 {
-			pdf.CellFormat(colNo+colName+colQty+colPrice, 8, "Paid to Date", "1", 0, "R", false, 0, "")
-			pdf.CellFormat(colSubtotal, 8, "- Rp "+formatIDR(so.PaidAmount), "1", 0, "R", false, 0, "")
-			pdf.Ln(8)
-		}
-
-		remaining := so.TotalAmount - so.PaidAmount
-		if remaining < 0 {
-			remaining = 0
-		}
-		pdf.SetFont("Arial", "B", 10)
-		pdf.CellFormat(colNo+colName+colQty+colPrice, 8, "Remaining", "1", 0, "R", true, 0, "")
-		pdf.CellFormat(colSubtotal, 8, "Rp "+formatIDR(remaining), "1", 0, "R", true, 0, "")
 		pdf.Ln(12)
 	}
 
@@ -172,25 +146,25 @@ func GenerateInvoicePDF(so *models.SalesOrder) (string, []byte, error) {
 	}
 
 	// === Signature ===
-	pdf.Ln(14)
+	pdf.Ln(15)
 	pdf.SetFont("Arial", "B", 11)
-	pdf.Cell(80, 7, "Issued By")
-	pdf.Cell(80, 7, "Customer")
+	pdf.Cell(80, 7, "Sender")
+	pdf.Cell(80, 7, "Receiver")
 	pdf.Ln(20)
 	pdf.Cell(80, 7, "(..................)")
 	pdf.Cell(80, 7, "(..................)")
 	pdf.Ln(10)
 
 	// Footer
-	pdf.Ln(8)
+	pdf.Ln(10)
 	pdf.SetFont("Arial", "I", 8)
 	pdf.Cell(0, 5, fmt.Sprintf("Generated at %s", time.Now().Format("02 January 2006 15:04:05")))
 
-	// Output
+	// Output to bytes
 	var buf bytes.Buffer
 	if err := pdf.Output(&buf); err != nil {
-		return "", nil, fmt.Errorf("failed to generate Invoice PDF: %w", err)
+		return "", nil, fmt.Errorf("failed to generate PDF: %w", err)
 	}
-	filename := fmt.Sprintf("INV_%s_%s.pdf", so.SONumber, time.Now().Format("20060102150405"))
+	filename := fmt.Sprintf("DO_%s_%s.pdf", so.SONumber, time.Now().Format("20060102150405"))
 	return filename, buf.Bytes(), nil
 }

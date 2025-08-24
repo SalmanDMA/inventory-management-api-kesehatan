@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/SalmanDMA/inventory-app/backend/src/configs"
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
 	"github.com/gofiber/fiber/v2"
@@ -17,33 +18,30 @@ type RoleService struct {
 }
 
 func NewRoleService(roleRepo repositories.RoleRepository) *RoleService {
-	return &RoleService{
-		RoleRepository: roleRepo,
-	}
+	return &RoleService{RoleRepository: roleRepo}
 }
 
 func (service *RoleService) GetAllRoles(userInfo *models.User) ([]models.ResponseGetRole, error) {
-	roles, err := service.RoleRepository.FindAll()
+	roles, err := service.RoleRepository.FindAll(nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var rolesResponse []models.ResponseGetRole
-	for _, role := range roles {
-		rolesResponse = append(rolesResponse, models.ResponseGetRole{
-			ID:          role.ID,
-			Name:        role.Name,
-			Alias:       role.Alias,
-			Color:       role.Color,
-			Description: role.Description,
-			RoleModules: role.RoleModules,
-			CreatedAt: 	role.CreatedAt,
-			UpdatedAt: 	role.UpdatedAt,
-			DeletedAt: 	role.DeletedAt,
+	out := make([]models.ResponseGetRole, 0, len(roles))
+	for _, r := range roles {
+		out = append(out, models.ResponseGetRole{
+			ID:          r.ID,
+			Name:        r.Name,
+			Alias:       r.Alias,
+			Color:       r.Color,
+			Description: r.Description,
+			RoleModules: r.RoleModules,
+			CreatedAt:   r.CreatedAt,
+			UpdatedAt:   r.UpdatedAt,
+			DeletedAt:   r.DeletedAt,
 		})
 	}
-
-	return rolesResponse, nil
+	return out, nil
 }
 
 func (service *RoleService) GetAllRolesPaginated(req *models.PaginationRequest, userInfo *models.User) (*models.RolePaginatedResponse, error) {
@@ -54,69 +52,61 @@ func (service *RoleService) GetAllRolesPaginated(req *models.PaginationRequest, 
 		req.Limit = 10
 	}
 	if req.Limit > 100 {
-		req.Limit = 100 
+		req.Limit = 100
 	}
 	if req.Status == "" {
 		req.Status = "active"
 	}
 
-	roles, totalCount, err := service.RoleRepository.FindAllPaginated(req)
+	roles, totalCount, err := service.RoleRepository.FindAllPaginated(nil, req)
 	if err != nil {
 		return nil, err
 	}
 
-	rolesResponse := []models.ResponseGetRole{}
-	for _, role := range roles {
-		if strings.ToLower(userInfo.Role.Name) != "developer" && strings.ToLower(role.Name) == "developer" {
+	resp := make([]models.ResponseGetRole, 0, len(roles))
+	for _, r := range roles {
+		if strings.ToLower(userInfo.Role.Name) != "developer" && strings.ToLower(r.Name) == "developer" {
 			continue
 		}
-		
-		rolesResponse = append(rolesResponse, models.ResponseGetRole{
-		ID:          role.ID,
-			Name:        role.Name,
-			Alias:       role.Alias,
-			Color:       role.Color,
-			Description: role.Description,
-			RoleModules: role.RoleModules,
-			CreatedAt: 	role.CreatedAt,
-			UpdatedAt: 	role.UpdatedAt,
-			DeletedAt: 	role.DeletedAt,
+		resp = append(resp, models.ResponseGetRole{
+			ID:          r.ID,
+			Name:        r.Name,
+			Alias:       r.Alias,
+			Color:       r.Color,
+			Description: r.Description,
+			RoleModules: r.RoleModules,
+			CreatedAt:   r.CreatedAt,
+			UpdatedAt:   r.UpdatedAt,
+			DeletedAt:   r.DeletedAt,
 		})
 	}
 
 	totalPages := int((totalCount + int64(req.Limit) - 1) / int64(req.Limit))
-	hasNext := req.Page < totalPages
-	hasPrev := req.Page > 1
-
-	paginationResponse := models.PaginationResponse{
-		CurrentPage:  req.Page,
-		PerPage:      req.Limit,
-		TotalPages:   totalPages,
-		TotalRecords: totalCount,
-		HasNext:      hasNext,
-		HasPrev:      hasPrev,
-	}
-
 	return &models.RolePaginatedResponse{
-		Data:       rolesResponse,
-		Pagination: paginationResponse,
+		Data: resp,
+		Pagination: models.PaginationResponse{
+			CurrentPage:  req.Page,
+			PerPage:      req.Limit,
+			TotalPages:   totalPages,
+			TotalRecords: totalCount,
+			HasNext:      req.Page < totalPages,
+			HasPrev:      req.Page > 1,
+		},
 	}, nil
 }
 
 func (service *RoleService) GetRoleByID(roleId string) (*models.ResponseGetRole, error) {
-	role, err := service.RoleRepository.FindById(roleId, false)
-
+	role, err := service.RoleRepository.FindById(nil, roleId, false)
 	if err != nil {
 		return nil, err
 	}
-
 	return &models.ResponseGetRole{
-		 ID:          role.ID,
-			Name:        role.Name,
-			Alias:       role.Alias,
-			Color:       role.Color,
-			Description: role.Description,
-			RoleModules: role.RoleModules,
+		ID:          role.ID,
+		Name:        role.Name,
+		Alias:       role.Alias,
+		Color:       role.Color,
+		Description: role.Description,
+		RoleModules: role.RoleModules,
 	}, nil
 }
 
@@ -125,8 +115,7 @@ func (s *RoleService) CreateRole(req *models.RoleCreateRequest, ctx *fiber.Ctx, 
 	_ = userInfo
 
 	norm := func(v string) string { return strings.ToLower(strings.TrimSpace(v)) }
-
-	name  := norm(req.Name)
+	name := norm(req.Name)
 	alias := norm(req.Alias)
 	color := norm(req.Color)
 
@@ -143,13 +132,14 @@ func (s *RoleService) CreateRole(req *models.RoleCreateRequest, ctx *fiber.Ctx, 
 		return nil, errors.New("color must be a valid hex (e.g. #1a2b3c)")
 	}
 
-	if _, err := s.RoleRepository.FindByName(name); err == nil {
+	// cek duplikasi (read boleh tanpa tx)
+	if _, err := s.RoleRepository.FindByName(nil, name); err == nil {
 		return nil, errors.New("role name already exists")
 	} else if !errors.Is(err, repositories.ErrRoleNotFound) {
 		return nil, fmt.Errorf("check name failed: %w", err)
 	}
 	if alias != "" {
-		if _, err := s.RoleRepository.FindByAlias(alias); err == nil {
+		if _, err := s.RoleRepository.FindByAlias(nil, alias); err == nil {
 			return nil, errors.New("role alias already exists")
 		} else if !errors.Is(err, repositories.ErrRoleNotFound) {
 			return nil, fmt.Errorf("check alias failed: %w", err)
@@ -158,18 +148,33 @@ func (s *RoleService) CreateRole(req *models.RoleCreateRequest, ctx *fiber.Ctx, 
 
 	role := &models.Role{
 		ID:          uuid.New(),
-		Name:        name,   
-		Alias:       alias,  
-		Color:       color,  
+		Name:        name,
+		Alias:       alias,
+		Color:       color,
 		Description: req.Description,
 	}
 
-	created, err := s.RoleRepository.Insert(role)
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	created, err := s.RoleRepository.Insert(tx, role)
 	if err != nil {
+		_ = tx.Rollback()
 		if repositories.IsUniqueViolation(err) {
 			return nil, errors.New("role name/alias already exists")
 		}
 		return nil, fmt.Errorf("insert role failed: %w", err)
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	return created, nil
 }
@@ -178,7 +183,7 @@ func (s *RoleService) UpdateRole(roleID string, upd *models.RoleUpdateRequest, c
 	_ = ctx
 	_ = userInfo
 
-	existing, err := s.RoleRepository.FindById(roleID, false)
+	existing, err := s.RoleRepository.FindById(nil, roleID, false)
 	if err != nil {
 		if errors.Is(err, repositories.ErrRoleNotFound) {
 			return nil, errors.New("role not found")
@@ -194,7 +199,7 @@ func (s *RoleService) UpdateRole(roleID string, upd *models.RoleUpdateRequest, c
 			return nil, errors.New("name exceeds max length")
 		}
 		if newName != existing.Name {
-			if ex, err := s.RoleRepository.FindByName(newName); err == nil && ex.ID != existing.ID {
+			if ex, err := s.RoleRepository.FindByName(nil, newName); err == nil && ex.ID != existing.ID {
 				return nil, errors.New("role name already exists")
 			} else if err != nil && !errors.Is(err, repositories.ErrRoleNotFound) {
 				return nil, fmt.Errorf("check name failed: %w", err)
@@ -209,7 +214,7 @@ func (s *RoleService) UpdateRole(roleID string, upd *models.RoleUpdateRequest, c
 			return nil, errors.New("alias exceeds max length")
 		}
 		if newAlias != existing.Alias {
-			if ex, err := s.RoleRepository.FindByAlias(newAlias); err == nil && ex.ID != existing.ID {
+			if ex, err := s.RoleRepository.FindByAlias(nil, newAlias); err == nil && ex.ID != existing.ID {
 				return nil, errors.New("role alias already exists")
 			} else if err != nil && !errors.Is(err, repositories.ErrRoleNotFound) {
 				return nil, fmt.Errorf("check alias failed: %w", err)
@@ -230,62 +235,113 @@ func (s *RoleService) UpdateRole(roleID string, upd *models.RoleUpdateRequest, c
 		existing.Description = upd.Description
 	}
 
-	updated, err := s.RoleRepository.Update(existing)
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	updated, err := s.RoleRepository.Update(tx, existing)
 	if err != nil {
+		_ = tx.Rollback()
 		if repositories.IsUniqueViolation(err) {
-			return nil, errors.New("role name/alias already exists")
+		 return nil, errors.New("role name/alias already exists")
 		}
 		return nil, fmt.Errorf("update role failed: %w", err)
+	}
+	if err := tx.Commit().Error; err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	return updated, nil
 }
 
 func (service *RoleService) DeleteRoles(roleRequest *models.RoleIsHardDeleteRequest, ctx *fiber.Ctx, userInfo *models.User) error {
+	_ = ctx
+	_ = userInfo
+
 	for _, roleId := range roleRequest.IDs {
-		_, err := service.RoleRepository.FindById(roleId.String(), false)
-		if err != nil {
+		// pastikan ada
+		if _, err := service.RoleRepository.FindById(nil, roleId.String(), true); err != nil {
 			if err == repositories.ErrRoleNotFound {
 				log.Printf("Role not found: %v\n", roleId)
 				continue
 			}
 			log.Printf("Error finding role %v: %v\n", roleId, err)
-			return errors.New("error finding useroler")
+			return errors.New("error finding role")
 		}
 
-		if roleRequest.IsHardDelete == "hardDelete" {
-			if err := service.RoleRepository.Delete(roleId.String(), true); err != nil {
-				log.Printf("Error hard deleting role %v: %v\n", roleId, err)
-				return errors.New("error hard deleting role")
-			}
-		} else {
-			if err := service.RoleRepository.Delete(roleId.String(), false); err != nil {
-				log.Printf("Error soft deleting role %v: %v\n", roleId, err)
-				return errors.New("error soft deleting role")
-			}
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			log.Printf("Failed to begin transaction for role %v: %v\n", roleId, tx.Error)
+			return errors.New("error beginning transaction")
 		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					_ = tx.Rollback()
+				}
+			}()
+			if err := service.RoleRepository.Delete(tx, roleId.String(), roleRequest.IsHardDelete == "hardDelete"); err != nil {
+				_ = tx.Rollback()
+				log.Printf("Error deleting role %v: %v\n", roleId, err)
+				panic("rollback")
+			}
+			if err := tx.Commit().Error; err != nil {
+				log.Printf("Error committing delete for role %v: %v\n", roleId, err)
+				panic("rollback")
+			}
+		}()
 	}
-
 	return nil
 }
 
-func (service *RoleService) RestoreRoles(role *models.RoleRestoreRequest, ctx *fiber.Ctx, userInfo *models.User) ([]models.Role, error) {
-	var restoredRoles []models.Role
+func (service *RoleService) RestoreRoles(req *models.RoleRestoreRequest, ctx *fiber.Ctx, userInfo *models.User) ([]models.Role, error) {
+	_ = ctx
+	_ = userInfo
 
-	for _, roleId := range role.IDs {
-		role := &models.Role{ID: roleId}
-
-		restoredRole, err := service.RoleRepository.Restore(role, roleId.String())
-		if err != nil {
+	var restored []models.Role
+	for _, id := range req.IDs {
+		if _, err := service.RoleRepository.FindById(nil, id.String(), true); err != nil {
 			if err == repositories.ErrRoleNotFound {
-				log.Printf("Role not found: %v\n", roleId)
+				log.Printf("Role not found for restore: %v\n", id)
 				continue
 			}
-			log.Printf("Error restoring role %v: %v\n", roleId, err)
-			return nil, errors.New("error restoring role")
+			log.Printf("Error finding role %v: %v\n", id, err)
+			return nil, errors.New("error finding role")
 		}
 
-		restoredRoles = append(restoredRoles, *restoredRole)
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			log.Printf("Failed to begin transaction for role restore %v: %v\n", id, tx.Error)
+			return nil, errors.New("error beginning transaction")
+		}
+		var r *models.Role
+		func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					_ = tx.Rollback()
+				}
+			}()
+			role := &models.Role{ID: id}
+			var err error
+			r, err = service.RoleRepository.Restore(tx, role.ID.String())
+			if err != nil {
+				_ = tx.Rollback()
+				log.Printf("Error restoring role %v: %v\n", id, err)
+				panic("rollback")
+			}
+			if err := tx.Commit().Error; err != nil {
+				log.Printf("Error committing role restore %v: %v\n", id, err)
+				panic("rollback")
+			}
+		}()
+		if r != nil {
+			restored = append(restored, *r)
+		}
 	}
-
-	return restoredRoles, nil
+	return restored, nil
 }

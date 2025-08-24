@@ -7,11 +7,11 @@ import (
 	"gorm.io/gorm"
 )
 
-type Facility struct {
+type Customer struct {
 	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
-	Code           string    `gorm:"size:30;uniqueIndex:ux_fac_code;not null" json:"code"`
+	Nomor          string    `gorm:"size:30;uniqueIndex:ux_fac_nomor;not null" json:"nomor"`
 	Name           string    `gorm:"size:150;index;not null" json:"name"`
-	FacilityTypeID uuid.UUID `gorm:"type:uuid;index;not null" json:"facility_type_id"`
+	CustomerTypeID uuid.UUID `gorm:"type:uuid;index;not null" json:"customer_type_id"`
 	AreaID         uuid.UUID `gorm:"type:uuid;index;not null" json:"area_id"`
 
 	Address   *string  `gorm:"size:255" json:"address,omitempty"`
@@ -24,15 +24,15 @@ type Facility struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 
-	FacilityType FacilityType `gorm:"constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;foreignKey:FacilityTypeID;references:ID" json:"facility_type"`
+	CustomerType CustomerType `gorm:"constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;foreignKey:CustomerTypeID;references:ID" json:"customer_type"`
 	Area         Area         `gorm:"constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;foreignKey:AreaID;references:ID" json:"area"`
 }
 
-type ResponseGetFacility struct {
+type ResponseGetCustomer struct {
 	ID    uuid.UUID `json:"id"`
-	Code  string    `json:"code"`
+	Nomor  string    `json:"nomor"`
 	Name  string    `json:"name"`
-	FacilityTypeID uuid.UUID `json:"facility_type_id"`
+	CustomerTypeID uuid.UUID `json:"customer_type_id"`
 	AreaID         uuid.UUID `json:"area_id"`
 	Address   *string  `json:"address,omitempty"`
 	Phone     *string  `json:"phone,omitempty"`
@@ -40,7 +40,7 @@ type ResponseGetFacility struct {
 	Latitude  *float64 `json:"latitude,omitempty"`
 	Longitude *float64 `json:"longitude,omitempty"`
 
-	FacilityType FacilityType `json:"facility_type"`
+	CustomerType CustomerType `json:"customer_type"`
 	Area         Area `json:"area"`
 
 	CreatedAt time.Time      `json:"created_at"`
@@ -48,10 +48,10 @@ type ResponseGetFacility struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 }
 
-type FacilityCreateRequest struct {
-	Code           string    `json:"code" validate:"required"`
+type CustomerCreateRequest struct {
+	Nomor           string    `json:"nomor" validate:"required"`
 	Name           string    `json:"name" validate:"required"`
-	FacilityTypeID uuid.UUID `json:"facility_type_id" validate:"required"`
+	CustomerTypeID uuid.UUID `json:"customer_type_id" validate:"required"`
 	AreaID         uuid.UUID `json:"area_id" validate:"required"`
 	Address   *string  `json:"address,omitempty"`
 	Phone     *string  `json:"phone,omitempty"`
@@ -60,11 +60,11 @@ type FacilityCreateRequest struct {
 	Longitude *float64 `json:"longitude,omitempty"`
 }
 
-type FacilityIsHardDeleteRequest struct {
+type CustomerIsHardDeleteRequest struct {
 	IsHardDelete string      `json:"is_hard_delete" validate:"required"`
 	IDs          []uuid.UUID `json:"ids" validate:"required,dive,required"`
 }
 
-type FacilityRestoreRequest struct {
+type CustomerRestoreRequest struct {
 	IDs []uuid.UUID `json:"ids" validate:"required,dive,required"`
 }

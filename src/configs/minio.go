@@ -2,10 +2,12 @@ package configs
 
 import (
 	"context"
-	"fmt"
 	"log"
+	"net"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -19,16 +21,22 @@ func InitMinio() {
 	useSSL, _ := strconv.ParseBool(os.Getenv("MINIO_USE_SSL"))
 	ak := os.Getenv("MINIO_ACCESS_KEY")
 	sk := os.Getenv("MINIO_SECRET_KEY")
-	bucket := os.Getenv("MINIO_BUCKET_NAME")     
+	bucket := os.Getenv("MINIO_BUCKET_NAME")
 
-	if host == "" || port == "" {
-		log.Fatal("MINIO_ENDPOINT or MINIO_PORT is empty")
+	if host == "" {
+		log.Fatal("MINIO_ENDPOINT is empty")
 	}
 	if bucket == "" {
 		log.Fatal("MINIO_BUCKET_NAME is empty")
 	}
 
-	endpoint := fmt.Sprintf("%s:%s", host, port)
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.TrimPrefix(host, "http://")
+
+	endpoint := host
+	if !useSSL && port != "" {
+		endpoint = net.JoinHostPort(host, port)
+	}
 
 	cl, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(ak, sk, ""),
@@ -39,7 +47,8 @@ func InitMinio() {
 	}
 	Minio = cl
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	exists, err := Minio.BucketExists(ctx, bucket)
 	if err != nil {
@@ -53,4 +62,6 @@ func InitMinio() {
 			}
 		}
 	}
+
+	log.Printf("MinIO initialized. Endpoint=%s (SSL=%v), Bucket=%s", endpoint, useSSL, bucket)
 }

@@ -20,8 +20,8 @@ var (
 	ErrItemNotFound    = errors.New("item not found")
 	ErrItemHistoryNotFound = errors.New("item history not found")
 	ErrAreaNotFound    = errors.New("area not found")
-	ErrFacilityTypeNotFound = errors.New("facility type not found")
-	ErrFacilityNotFound = errors.New("facility not found")
+	ErrCustomerTypeNotFound = errors.New("customer type not found")
+	ErrCustomerNotFound = errors.New("customer not found")
 	ErrSalesPersonNotFound = errors.New("sales person not found")
 	ErrSalesAssignmentNotFound = errors.New("sales assignment not found")
 	ErrSupplierNotFound = errors.New("supplier not found")
@@ -30,6 +30,7 @@ var (
 	ErrPurchaseOrderNotFound = errors.New("purchase order not found")
 	ErrPurchaseOrderItemNotFound = errors.New("purchase order item not found")
 	ErrNotificationNotFound = errors.New("notification not found")
+	ErrUoMNotFound = errors.New("UoM not found")
 	ErrDatabase        = errors.New("database error")
 	ErrUniqueViolation = errors.New("unique constraint violation")
 )
@@ -57,10 +58,10 @@ func HandleDatabaseError(err error, entity string) error {
 			return ErrItemHistoryNotFound
 		case "area":
 			return ErrAreaNotFound
-		case "facility_type":
-			return ErrFacilityTypeNotFound
-		case "facility":
-			return ErrFacilityNotFound
+		case "customer_type":
+			return ErrCustomerTypeNotFound
+		case "customer":
+			return ErrCustomerNotFound
 		case "sales_person":
 			return ErrSalesPersonNotFound
 		case "sales_assignment":
@@ -77,6 +78,8 @@ func HandleDatabaseError(err error, entity string) error {
 			return ErrPurchaseOrderItemNotFound
 		case "notification":
 			return ErrNotificationNotFound
+		case "uom":
+			return ErrUoMNotFound
 		default:
 			return fmt.Errorf("%w: entity not found", ErrDatabase)
 		}

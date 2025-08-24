@@ -21,72 +21,73 @@ func NewDashboardService(
 }
 
 func (s *DashboardService) GetDashboardSummary() (*models.DashboardSummary, error) {
-	currentTotalItems, err := s.ItemRepository.CountAllThisMonth()
+	// Items
+	currentTotalItems, err := s.ItemRepository.CountAllThisMonth(nil)
 	if err != nil {
 		return nil, err
 	}
-	previousTotalItems, err := s.ItemRepository.CountAllLastMonth()
-	if err != nil {
-		return nil, err
-	}
-
-	// Low Stock (snapshot vs "last month" — fallback)
-	lowNow, err := s.ItemRepository.CountLowStockNow()
-	if err != nil {
-		return nil, err
-	}
-	lowPrev, err := s.ItemRepository.CountLowStockLastMonth()
+	previousTotalItems, err := s.ItemRepository.CountAllLastMonth(nil)
 	if err != nil {
 		return nil, err
 	}
 
-	// Active Orders = minimal Confirmed (Confirmed, Shipped, Delivered)
-	activeNow, err := s.SalesOrderRepository.CountActiveThisMonth()
+	// Low stock
+	lowNow, err := s.ItemRepository.CountLowStockNow(nil)
 	if err != nil {
 		return nil, err
 	}
-	activePrev, err := s.SalesOrderRepository.CountActiveLastMonth()
+	lowPrev, err := s.ItemRepository.CountLowStockLastMonth(nil)
 	if err != nil {
 		return nil, err
 	}
 
-	// Total Value = SUM(total_amount) untuk SO Closed
-	valueNow, err := s.SalesOrderRepository.SumClosedValueThisMonth()
+	// Active orders (Confirmed/On-going)
+	activeNow, err := s.SalesOrderRepository.CountActiveThisMonth(nil)
 	if err != nil {
 		return nil, err
 	}
-	valuePrev, err := s.SalesOrderRepository.SumClosedValueLastMonth()
+	activePrev, err := s.SalesOrderRepository.CountActiveLastMonth(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Closed value
+	valueNow, err := s.SalesOrderRepository.SumClosedValueThisMonth(nil)
+	if err != nil {
+		return nil, err
+	}
+	valuePrev, err := s.SalesOrderRepository.SumClosedValueLastMonth(nil)
 	if err != nil {
 		return nil, err
 	}
 
 	return &models.DashboardSummary{
-		TotalItems:    calculateMetric[int64](currentTotalItems, previousTotalItems),
-		LowStockItems: calculateMetric[int64](lowNow, lowPrev),
-		ActiveOrders:  calculateMetric[int64](activeNow, activePrev),
-		TotalValue:    calculateMetric[float64](valueNow, valuePrev),
+		TotalItems:    calculateMetric(currentTotalItems, previousTotalItems),
+		LowStockItems: calculateMetric(lowNow, lowPrev),
+		ActiveOrders:  calculateMetric(activeNow, activePrev),
+		TotalValue:    calculateMetric(valueNow, valuePrev),
 	}, nil
 }
 
 func calculateMetric[T int64 | float64](current, previous T) models.MetricWithChange[T] {
-    change := current - previous
+	change := current - previous
 
-    var pct int
-    if previous != 0 {
-        pct = int(float64(change) / float64(previous) * 100)
-    }
+	var pct int
+	if previous != 0 {
+		pct = int(float64(change) / float64(previous) * 100)
+	}
 
-    trend := "same"
-    if change > 0 {
-        trend = "up"
-    } else if change < 0 {
-        trend = "down"
-    }
+	trend := "same"
+	if change > 0 {
+		trend = "up"
+	} else if change < 0 {
+		trend = "down"
+	}
 
-    return models.MetricWithChange[T]{
-        Value:     current,
-        Change:    int(change),
-        ChangePct: pct,
-        Trend:     trend,
-    }
+	return models.MetricWithChange[T]{
+		Value:     current,
+		Change:    int(change),
+		ChangePct: pct,
+		Trend:     trend,
+	}
 }

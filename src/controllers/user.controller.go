@@ -7,7 +7,6 @@ import (
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
 	"github.com/SalmanDMA/inventory-app/backend/src/services"
 	"github.com/gofiber/fiber/v2"
-	"github.com/google/uuid"
 )
 
 // UserControllerGetAll adalah handler untuk endpoint user dengan pagination
@@ -131,36 +130,19 @@ func UserControllerGetById(ctx *fiber.Ctx) error {
 	}
 
 	userId := ctx.Params("id")
-
 	userRepo := repositories.NewUserRepository(configs.DB)
-	user, err := userRepo.FindById(userId, false)
+	uploadRepo := repositories.NewUploadRepository(configs.DB)
+	userService := services.NewUserService(userRepo,uploadRepo)
+
+	user, err := userService.GetUserByID(userId,	userInfo)
 	if err != nil {
-					if err == repositories.ErrUserNotFound {
-									return helpers.Response(ctx, fiber.StatusNotFound, "User not found", nil)
-					}
-					return helpers.Response(ctx, fiber.StatusInternalServerError, "Error getting user: "+err.Error(), nil)
+		if err == repositories.ErrUserNotFound {
+			return helpers.Response(ctx, fiber.StatusNotFound, "User not found", nil)
+		}
+		return helpers.Response(ctx, fiber.StatusInternalServerError, "Error getting user: "+err.Error(), nil)
 	}
 
-	var roleId uuid.UUID
-	if user.RoleID != nil {
-		roleId = *user.RoleID
-	}
-
-	userResponse := &models.ResponseGetUser{
-					ID:          user.ID,
-					Username:    user.Username,
-					Name:        user.Name,
-					Email:       user.Email,
-					Address:     user.Address,
-					Phone:       user.Phone,
-					Avatar:      user.Avatar,
-					AvatarID:    user.AvatarID,
-					Role:        user.Role,
-					RoleID:      roleId,
-					Description: user.Description,
-	}
-
-	return helpers.Response(ctx, fiber.StatusOK, "Success get user", userResponse)
+	return helpers.Response(ctx, fiber.StatusOK, "Success get user", user)
 }
 
 // UserControllerGetProfile adalah handler untuk endpoint user
@@ -181,7 +163,10 @@ func UserControllerGetProfile(ctx *fiber.Ctx) error {
 	}
 
 	userRepo := repositories.NewUserRepository(configs.DB)
-	user, err := userRepo.FindById(userInfo.ID.String(), false)
+	uploadRepo := repositories.NewUploadRepository(configs.DB)
+	userService := services.NewUserService(userRepo,uploadRepo)
+
+	user, err := userService.GetUserByID(userInfo.ID.String(),	userInfo)
 	if err != nil {
 		if err == repositories.ErrUserNotFound {
 			return helpers.Response(ctx, fiber.StatusNotFound, "User not found", nil)
@@ -189,22 +174,8 @@ func UserControllerGetProfile(ctx *fiber.Ctx) error {
 		return helpers.Response(ctx, fiber.StatusInternalServerError, "Error getting user: "+err.Error(), nil)
 	}
 
-	userResponse := &models.ResponseGerUserProfile{
-		ID:                user.ID,
-		Username:          user.Username,
-		Name:              user.Name,
-		Email:             user.Email,
-		Address:           user.Address,
-		Phone:             user.Phone,
-		AvatarID:          user.AvatarID,
-		Avatar:            user.Avatar,
-		Role:              user.Role,
-		Description:       user.Description,
-		RoleID:            user.RoleID,
-	}
 
-
-	return helpers.Response(ctx, fiber.StatusOK, "Success get user", userResponse)
+	return helpers.Response(ctx, fiber.StatusOK, "Success get user", user)
 }
 
 // UserControllerUpdateProfile adalah handler untuk endpoint user update profile

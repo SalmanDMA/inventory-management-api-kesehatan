@@ -56,20 +56,20 @@ func GenerateReceiptPDF(so *models.SalesOrder) (string, []byte, error) {
 	}
 	pdf.Ln(2)
 
-	// Received From (Facility)
-	if so.Facility.ID.String() != "00000000-0000-0000-0000-000000000000" {
+	// Received From (Customer)
+	if so.Customer.ID.String() != "00000000-0000-0000-0000-000000000000" {
 		pdf.SetFont("Arial", "B", 13)
 		pdf.Cell(0, 8, "Received From")
 		pdf.Ln(9)
 
-		row("Name:", so.Facility.Name)
-		if v := so.Facility.Email; v != nil {
+		row("Name:", so.Customer.Name)
+		if v := so.Customer.Email; v != nil {
 			row("Email:", *v)
 		}
-		if v := so.Facility.Phone; v != nil {
+		if v := so.Customer.Phone; v != nil {
 			row("Phone:", *v)
 		}
-		if v := so.Facility.Address; v != nil {
+		if v := so.Customer.Address; v != nil {
 			pdf.SetFont("Arial", "B", 11)
 			pdf.Cell(45, 7, "Address:")
 			pdf.SetFont("Arial", "", 11)

@@ -9,19 +9,27 @@ import (
 	"gorm.io/gorm"
 )
 
+// ==============================
+// Interface (transaction-aware)
+// ==============================
+
 type AreaRepository interface {
-	FindAll() ([]models.Area, error)
-	FindAllPaginated(req *models.PaginationRequest) ([]models.Area, int64, error)
-	FindById(areaId string, isSoftDelete bool) (*models.Area, error)
-	FindByName(areaName string) (*models.Area, error)
-	FindByCode(areaCode string) (*models.Area, error)
-	Insert(area *models.Area) (*models.Area, error)
-	Update(area *models.Area) (*models.Area, error)
-	Delete(areaId string, isHardDelete bool) error
-	Restore(area *models.Area, areaId string) (*models.Area, error)
+	FindAll(tx *gorm.DB) ([]models.Area, error)
+	FindAllPaginated(tx *gorm.DB, req *models.PaginationRequest) ([]models.Area, int64, error)
+	FindById(tx *gorm.DB, areaId string, includeTrashed bool) (*models.Area, error)
+	FindByName(tx *gorm.DB, areaName string) (*models.Area, error)
+	FindByCode(tx *gorm.DB, areaCode string) (*models.Area, error)
+	Insert(tx *gorm.DB, area *models.Area) (*models.Area, error)
+	Update(tx *gorm.DB, area *models.Area) (*models.Area, error)
+	Delete(tx *gorm.DB, areaId string, isHardDelete bool) error
+	Restore(tx *gorm.DB, areaId string) (*models.Area, error)
 }
 
-type AreaRepositoryImpl struct{
+// ==============================
+// Implementation
+// ==============================
+
+type AreaRepositoryImpl struct {
 	DB *gorm.DB
 }
 
@@ -29,51 +37,61 @@ func NewAreaRepository(db *gorm.DB) *AreaRepositoryImpl {
 	return &AreaRepositoryImpl{DB: db}
 }
 
-func (r *AreaRepositoryImpl) FindAll() ([]models.Area, error) {
+func (r *AreaRepositoryImpl) useDB(tx *gorm.DB) *gorm.DB {
+	if tx != nil {
+		return tx
+	}
+	return r.DB
+}
+
+// ---------- Reads ----------
+
+func (r *AreaRepositoryImpl) FindAll(tx *gorm.DB) ([]models.Area, error) {
 	var areas []models.Area
-	if err := r.DB.
-	 Unscoped().
-	 Find(&areas).Error; err != nil {
+	if err := r.useDB(tx).
+		Unscoped().
+		Find(&areas).Error; err != nil {
 		return nil, HandleDatabaseError(err, "area")
 	}
 	return areas, nil
 }
 
-func (r *AreaRepositoryImpl) FindAllPaginated(req *models.PaginationRequest) ([]models.Area, int64, error) {
+func (r *AreaRepositoryImpl) FindAllPaginated(tx *gorm.DB, req *models.PaginationRequest) ([]models.Area, int64, error) {
 	var (
 		areas      []models.Area
 		totalCount int64
 	)
 
-	query := r.DB.
+	q := r.useDB(tx).
 		Unscoped().
-		Model(&models.Area{}) 
+		Model(&models.Area{})
 
 	switch req.Status {
 	case "active":
-		query = query.Where("areas.deleted_at IS NULL")
+		q = q.Where("areas.deleted_at IS NULL")
 	case "deleted":
-		query = query.Where("areas.deleted_at IS NOT NULL")
+		q = q.Where("areas.deleted_at IS NOT NULL")
 	case "all":
+		// no filter
 	default:
-		query = query.Where("areas.deleted_at IS NULL")
+		q = q.Where("areas.deleted_at IS NULL")
 	}
 
 	if s := strings.TrimSpace(req.Search); s != "" {
 		p := "%" + strings.ToLower(s) + "%"
-		query = query.Where(`
+		q = q.Where(`
 			LOWER(areas.name)  LIKE ? OR
 			LOWER(areas.code)  LIKE ? OR
-			LOWER(areas.color) LIKE ?
+			LOWER(COALESCE(areas.color, '')) LIKE ?
 		`, p, p, p)
 	}
 
-	if err := query.Count(&totalCount).Error; err != nil {
+	if err := q.Count(&totalCount).Error; err != nil {
 		return nil, 0, HandleDatabaseError(err, "area")
 	}
 
 	offset := (req.Page - 1) * req.Limit
-	if err := query.
+	if err := q.
 		Order("areas.created_at DESC").
 		Offset(offset).
 		Limit(req.Limit).
@@ -84,89 +102,94 @@ func (r *AreaRepositoryImpl) FindAllPaginated(req *models.PaginationRequest) ([]
 	return areas, totalCount, nil
 }
 
-func (r *AreaRepositoryImpl) FindById(areaId string, isSoftDelete bool) (*models.Area, error) {
-	var area *models.Area
-	db := r.DB
-
-	if !isSoftDelete {
+func (r *AreaRepositoryImpl) FindById(tx *gorm.DB, areaId string, includeTrashed bool) (*models.Area, error) {
+	var area models.Area
+	db := r.useDB(tx)
+	if includeTrashed {
 		db = db.Unscoped()
 	}
 
 	if err := db.First(&area, "id = ?", areaId).Error; err != nil {
 		return nil, HandleDatabaseError(err, "area")
 	}
-	
-	return area, nil
+	return &area, nil
 }
 
-func (r *AreaRepositoryImpl) FindByName(areaName string) (*models.Area, error) {
-	var area *models.Area
-	if err := r.DB.Where("name = ?", areaName).First(&area).Error; err != nil {
+func (r *AreaRepositoryImpl) FindByName(tx *gorm.DB, areaName string) (*models.Area, error) {
+	var area models.Area
+	if err := r.useDB(tx).
+		Where("name = ?", areaName).
+		First(&area).Error; err != nil {
 		return nil, HandleDatabaseError(err, "area")
 	}
-	return area, nil
+	return &area, nil
 }
 
-func (r *AreaRepositoryImpl) FindByCode(areaCode string) (*models.Area, error) {
-	var area *models.Area
-	if err := r.DB.Where("code = ?", areaCode).First(&area).Error; err != nil {
+func (r *AreaRepositoryImpl) FindByCode(tx *gorm.DB, areaCode string) (*models.Area, error) {
+	var area models.Area
+	if err := r.useDB(tx).
+		Where("code = ?", areaCode).
+		First(&area).Error; err != nil {
 		return nil, HandleDatabaseError(err, "area")
 	}
-	return area, nil
+	return &area, nil
 }
 
-func (r *AreaRepositoryImpl) Insert(area *models.Area) (*models.Area, error) {
+// ---------- Mutations ----------
 
+func (r *AreaRepositoryImpl) Insert(tx *gorm.DB, area *models.Area) (*models.Area, error) {
 	if area.ID == uuid.Nil {
 		return nil, fmt.Errorf("area ID cannot be empty")
 	}
-
-	if err := r.DB.Create(&area).Error; err != nil {
+	if err := r.useDB(tx).Create(area).Error; err != nil {
 		return nil, HandleDatabaseError(err, "area")
 	}
 	return area, nil
 }
 
-func (r *AreaRepositoryImpl) Update(area *models.Area) (*models.Area, error) {
-
+func (r *AreaRepositoryImpl) Update(tx *gorm.DB, area *models.Area) (*models.Area, error) {
 	if area.ID == uuid.Nil {
 		return nil, fmt.Errorf("area ID cannot be empty")
 	}
-
-	if err := r.DB.Save(&area).Error; err != nil {
+	if err := r.useDB(tx).Save(area).Error; err != nil {
 		return nil, HandleDatabaseError(err, "area")
 	}
 	return area, nil
 }
 
-func (r *AreaRepositoryImpl) Delete(areaId string, isHardDelete bool) error {
-	var area *models.Area
+func (r *AreaRepositoryImpl) Delete(tx *gorm.DB, areaId string, isHardDelete bool) error {
+	db := r.useDB(tx)
 
-	if err := r.DB.Unscoped().First(&area, "id = ?", areaId).Error; err != nil {
+	var area models.Area
+	if err := db.Unscoped().First(&area, "id = ?", areaId).Error; err != nil {
 		return HandleDatabaseError(err, "area")
 	}
-	
+
 	if isHardDelete {
-		if err := r.DB.Unscoped().Delete(&area).Error; err != nil {
+		if err := db.Unscoped().Delete(&area).Error; err != nil {
 			return HandleDatabaseError(err, "area")
 		}
 	} else {
-		if err := r.DB.Delete(&area).Error; err != nil {
+		if err := db.Delete(&area).Error; err != nil {
 			return HandleDatabaseError(err, "area")
 		}
 	}
 	return nil
 }
 
-func (r *AreaRepositoryImpl) Restore(area *models.Area, areaId string) (*models.Area, error) {
-	if err := r.DB.Unscoped().Model(area).Where("id = ?", areaId).Update("deleted_at", nil).Error; err != nil {
-		return nil, err
+func (r *AreaRepositoryImpl) Restore(tx *gorm.DB, areaId string) (*models.Area, error) {
+	db := r.useDB(tx)
+
+	if err := db.Unscoped().
+		Model(&models.Area{}).
+		Where("id = ?", areaId).
+		Update("deleted_at", nil).Error; err != nil {
+		return nil, HandleDatabaseError(err, "area")
 	}
 
-	var restoredArea *models.Area
-	if err := r.DB.Unscoped().First(&restoredArea, "id = ?", areaId).Error; err != nil {
-		return nil, err
+	var restored models.Area
+	if err := db.First(&restored, "id = ?", areaId).Error; err != nil {
+		return nil, HandleDatabaseError(err, "area")
 	}
-	
-	return restoredArea, nil
+	return &restored, nil
 }

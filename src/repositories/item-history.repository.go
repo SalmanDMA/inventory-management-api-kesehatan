@@ -9,17 +9,25 @@ import (
 	"gorm.io/gorm"
 )
 
+// ==============================
+// Interface (transaction-aware)
+// ==============================
+
 type ItemHistoryRepository interface {
-	FindAllByItem(itemID uuid.UUID, changeType string) ([]models.ItemHistory, error)
-	FindAllPaginated(req *models.PaginationRequest) ([]models.ItemHistory, int64, error)
-	FindById(itemHistoryId string, isSoftDelete bool) (*models.ItemHistory, error)
-	FindLastByItem(itemID uuid.UUID, changeType string) (*models.ItemHistory, error)
-	Insert(itemHistory *models.ItemHistory) (*models.ItemHistory, error)
-	Delete(itemHistoryId string, isHardDelete bool) error
-	Restore(itemHistory *models.ItemHistory, itemHistoryId string) (*models.ItemHistory, error)
+	FindAllByItem(tx *gorm.DB, itemID uuid.UUID, changeType string) ([]models.ItemHistory, error)
+	FindAllPaginated(tx *gorm.DB, req *models.PaginationRequest) ([]models.ItemHistory, int64, error)
+	FindById(tx *gorm.DB, itemHistoryId string, includeTrashed bool) (*models.ItemHistory, error)
+	FindLastByItem(tx *gorm.DB, itemID uuid.UUID, changeType string) (*models.ItemHistory, error)
+	Insert(tx *gorm.DB, itemHistory *models.ItemHistory) (*models.ItemHistory, error)
+	Delete(tx *gorm.DB, itemHistoryId string, isHardDelete bool) error
+	Restore(tx *gorm.DB, itemHistoryId string) (*models.ItemHistory, error)
 }
 
-type ItemHistoryRepositoryImpl struct{
+// ==============================
+// Implementation
+// ==============================
+
+type ItemHistoryRepositoryImpl struct {
 	DB *gorm.DB
 }
 
@@ -27,12 +35,20 @@ func NewItemHistoryRepository(db *gorm.DB) *ItemHistoryRepositoryImpl {
 	return &ItemHistoryRepositoryImpl{DB: db}
 }
 
-func (r *ItemHistoryRepositoryImpl) FindAllByItem(itemID uuid.UUID, changeType string) ([]models.ItemHistory, error) {
-	var itemHistories []models.ItemHistory
-	db := r.DB
+func (r *ItemHistoryRepositoryImpl) useDB(tx *gorm.DB) *gorm.DB {
+	if tx != nil {
+		return tx
+	}
+	return r.DB
+}
+
+// ---------- Reads ----------
+
+func (r *ItemHistoryRepositoryImpl) FindAllByItem(tx *gorm.DB, itemID uuid.UUID, changeType string) ([]models.ItemHistory, error) {
+	var histories []models.ItemHistory
+	db := r.useDB(tx)
 
 	var changeGroup []string
-
 	switch strings.ToLower(changeType) {
 	case "stock", "create_stock", "update_stock":
 		changeGroup = []string{"create_stock", "update_stock"}
@@ -42,34 +58,35 @@ func (r *ItemHistoryRepositoryImpl) FindAllByItem(itemID uuid.UUID, changeType s
 		return nil, fmt.Errorf("invalid changeType '%s', must be 'stock' or 'price'", changeType)
 	}
 
-
 	if err := db.
 		Where("item_id = ? AND change_type IN ?", itemID, changeGroup).
 		Order("created_at DESC").
-		Find(&itemHistories).Error; err != nil {
+		Find(&histories).Error; err != nil {
 		return nil, HandleDatabaseError(err, "item_history")
 	}
-
-	return itemHistories, nil
+	return histories, nil
 }
 
-func (r *ItemHistoryRepositoryImpl) FindAllPaginated(req *models.PaginationRequest) ([]models.ItemHistory, int64, error) {
-	var histories []models.ItemHistory
-	var totalCount int64
+func (r *ItemHistoryRepositoryImpl) FindAllPaginated(tx *gorm.DB, req *models.PaginationRequest) ([]models.ItemHistory, int64, error) {
+	var (
+		histories  []models.ItemHistory
+		totalCount int64
+	)
 
-	query := r.DB.Unscoped().
+	query := r.useDB(tx).Unscoped().
 		Preload("Item").
 		Preload("CreatedByUser").
 		Preload("UpdatedByUser")
 
 	switch req.Status {
 	case "active":
-		query = query.Where("deleted_at IS NULL")
+		query = query.Where("item_histories.deleted_at IS NULL")
 	case "deleted":
-		query = query.Where("deleted_at IS NOT NULL")
+		query = query.Where("item_histories.deleted_at IS NOT NULL")
 	case "all":
+		// no filter
 	default:
-		query = query.Where("deleted_at IS NULL")
+		query = query.Where("item_histories.deleted_at IS NULL")
 	}
 
 	if req.ItemID != "" {
@@ -79,25 +96,24 @@ func (r *ItemHistoryRepositoryImpl) FindAllPaginated(req *models.PaginationReque
 	}
 
 	if req.ChangeType != "" {
-		changeType := strings.ToLower(req.ChangeType)
-		fmt.Println("changeType", changeType)
-		switch changeType {
+		switch strings.ToLower(req.ChangeType) {
 		case "stock", "create_stock", "update_stock":
 			query = query.Where("change_type IN ?", []string{"create_stock", "update_stock"})
 		case "price", "create_price", "update_price":
 			query = query.Where("change_type IN ?", []string{"create_price", "update_price"})
 		default:
-			query = query.Where("change_type = ?", changeType)
+			query = query.Where("change_type = ?", strings.ToLower(req.ChangeType))
 		}
 	}
 
-	if req.Search != "" {
-		search := "%" + strings.ToLower(req.Search) + "%"
-		query = query.Joins("LEFT JOIN items ON items.id = item_histories.item_id").
+	if s := strings.TrimSpace(req.Search); s != "" {
+		p := "%" + strings.ToLower(s) + "%"
+		query = query.
+			Joins("LEFT JOIN items ON items.id = item_histories.item_id").
 			Where(`
 				LOWER(items.name) LIKE ? OR
 				LOWER(items.code) LIKE ? OR
-				LOWER(items.description) LIKE ? OR
+				LOWER(COALESCE(items.description, '')) LIKE ? OR
 				CAST(item_histories.description AS TEXT) LIKE ? OR
 				CAST(item_histories.old_price AS TEXT) LIKE ? OR
 				CAST(item_histories.new_price AS TEXT) LIKE ? OR
@@ -105,11 +121,7 @@ func (r *ItemHistoryRepositoryImpl) FindAllPaginated(req *models.PaginationReque
 				CAST(item_histories.old_stock AS TEXT) LIKE ? OR
 				CAST(item_histories.new_stock AS TEXT) LIKE ? OR
 				CAST(item_histories.current_stock AS TEXT) LIKE ?
-			`,
-				search, search, search, 
-				search, search, search, 
-				search, search, search,
-			)
+			`, p, p, p, p, p, p, p, p, p, p)
 	}
 
 	if err := query.Model(&models.ItemHistory{}).Count(&totalCount).Error; err != nil {
@@ -128,11 +140,10 @@ func (r *ItemHistoryRepositoryImpl) FindAllPaginated(req *models.PaginationReque
 	return histories, totalCount, nil
 }
 
-func (r *ItemHistoryRepositoryImpl) FindById(itemHistoryId string, isSoftDelete bool) (*models.ItemHistory, error) {
-	var itemHistory *models.ItemHistory
-	db := r.DB
-
-	if !isSoftDelete {
+func (r *ItemHistoryRepositoryImpl) FindById(tx *gorm.DB, itemHistoryId string, includeTrashed bool) (*models.ItemHistory, error) {
+	var ih models.ItemHistory
+	db := r.useDB(tx)
+	if includeTrashed {
 		db = db.Unscoped()
 	}
 
@@ -140,21 +151,18 @@ func (r *ItemHistoryRepositoryImpl) FindById(itemHistoryId string, isSoftDelete 
 		Preload("Item").
 		Preload("CreatedByUser").
 		Preload("UpdatedByUser").
-	 First(&itemHistory, "id = ?", itemHistoryId).Error; err != nil {
+		First(&ih, "id = ?", itemHistoryId).Error; err != nil {
 		return nil, HandleDatabaseError(err, "item_history")
 	}
-	
-	return itemHistory, nil
+	return &ih, nil
 }
 
-func (r *ItemHistoryRepositoryImpl) FindLastByItem(itemID uuid.UUID, changeType string) (*models.ItemHistory, error) {
-	var itemHistory models.ItemHistory
-	db := r.DB
+func (r *ItemHistoryRepositoryImpl) FindLastByItem(tx *gorm.DB, itemID uuid.UUID, changeType string) (*models.ItemHistory, error) {
+	var ih models.ItemHistory
+	db := r.useDB(tx)
 
 	var changeGroup []string
-	changeType = strings.ToLower(changeType)
-
-	switch changeType {
+	switch strings.ToLower(changeType) {
 	case "stock", "create_stock", "update_stock":
 		changeGroup = []string{"create_stock", "update_stock"}
 	case "price", "create_price", "update_price":
@@ -169,52 +177,61 @@ func (r *ItemHistoryRepositoryImpl) FindLastByItem(itemID uuid.UUID, changeType 
 		Preload("UpdatedByUser").
 		Where("item_id = ? AND change_type IN ?", itemID, changeGroup).
 		Order("created_at DESC").
-		First(&itemHistory).Error; err != nil {
+		First(&ih).Error; err != nil {
 		return nil, HandleDatabaseError(err, "item_history")
 	}
-
-	return &itemHistory, nil
+	return &ih, nil
 }
 
-func (r *ItemHistoryRepositoryImpl) Insert(itemHistory *models.ItemHistory) (*models.ItemHistory, error) {
+// ---------- Mutations ----------
+
+func (r *ItemHistoryRepositoryImpl) Insert(tx *gorm.DB, itemHistory *models.ItemHistory) (*models.ItemHistory, error) {
 	if itemHistory.ID == uuid.Nil {
 		return nil, fmt.Errorf("itemHistory ID cannot be empty")
 	}
-
-	if err := r.DB.Create(&itemHistory).Error; err != nil {
+	if err := r.useDB(tx).Create(itemHistory).Error; err != nil {
 		return nil, HandleDatabaseError(err, "item_history")
 	}
 	return itemHistory, nil
 }
 
-func (r *ItemHistoryRepositoryImpl) Delete(itemHistoryId string, isHardDelete bool) error {
-	var itemHistory *models.ItemHistory
+func (r *ItemHistoryRepositoryImpl) Delete(tx *gorm.DB, itemHistoryId string, isHardDelete bool) error {
+	db := r.useDB(tx)
 
-	if err := r.DB.Unscoped().First(&itemHistory, "id = ?", itemHistoryId).Error; err != nil {
+	var ih models.ItemHistory
+	if err := db.Unscoped().First(&ih, "id = ?", itemHistoryId).Error; err != nil {
 		return HandleDatabaseError(err, "item_history")
 	}
-	
+
 	if isHardDelete {
-		if err := r.DB.Unscoped().Delete(&itemHistory).Error; err != nil {
+		if err := db.Unscoped().Delete(&ih).Error; err != nil {
 			return HandleDatabaseError(err, "item_history")
 		}
 	} else {
-		if err := r.DB.Delete(&itemHistory).Error; err != nil {
+		if err := db.Delete(&ih).Error; err != nil {
 			return HandleDatabaseError(err, "item_history")
 		}
 	}
 	return nil
 }
 
-func (r *ItemHistoryRepositoryImpl) Restore(itemHistory *models.ItemHistory, itemHistoryId string) (*models.ItemHistory, error) {
-	if err := r.DB.Unscoped().Model(itemHistory).Where("id = ?", itemHistoryId).Update("deleted_at", nil).Error; err != nil {
-		return nil, err
+func (r *ItemHistoryRepositoryImpl) Restore(tx *gorm.DB, itemHistoryId string) (*models.ItemHistory, error) {
+	db := r.useDB(tx)
+
+	if err := db.Unscoped().
+		Model(&models.ItemHistory{}).
+		Where("id = ?", itemHistoryId).
+		Update("deleted_at", nil).Error; err != nil {
+		return nil, HandleDatabaseError(err, "item_history")
 	}
 
-	var restoredItemHistory *models.ItemHistory
-	if err := r.DB.Unscoped().First(&restoredItemHistory, "id = ?", itemHistoryId).Error; err != nil {
-		return nil, err
+	var restored models.ItemHistory
+	if err := db.
+		Preload("Item").
+		Preload("CreatedByUser").
+		Preload("UpdatedByUser").
+		First(&restored, "id = ?", itemHistoryId).Error; err != nil {
+		return nil, HandleDatabaseError(err, "item_history")
 	}
-	
-	return restoredItemHistory, nil
+	return &restored, nil
 }

@@ -9,19 +9,27 @@ import (
 	"gorm.io/gorm"
 )
 
+// ==============================
+// Interface (transaction-aware)
+// ==============================
+
 type RoleRepository interface {
-	FindAll() ([]models.Role, error)
-	FindAllPaginated(req *models.PaginationRequest) ([]models.Role, int64, error)
-	FindById(roleId string, isSoftDelete bool) (*models.Role, error)
-	FindByName(roleName string) (*models.Role, error)
-	FindByAlias(roleAlias string) (*models.Role, error)
-	Insert(role *models.Role) (*models.Role, error)
-	Update(role *models.Role) (*models.Role, error)
-	Delete(roleId string, isHardDelete bool) error
-	Restore(role *models.Role, roleId string) (*models.Role, error)
+	FindAll(tx *gorm.DB) ([]models.Role, error)
+	FindAllPaginated(tx *gorm.DB, req *models.PaginationRequest) ([]models.Role, int64, error)
+	FindById(tx *gorm.DB, roleId string, includeTrashed bool) (*models.Role, error)
+	FindByName(tx *gorm.DB, roleName string) (*models.Role, error)
+	FindByAlias(tx *gorm.DB, roleAlias string) (*models.Role, error)
+	Insert(tx *gorm.DB, role *models.Role) (*models.Role, error)
+	Update(tx *gorm.DB, role *models.Role) (*models.Role, error)
+	Delete(tx *gorm.DB, roleId string, isHardDelete bool) error
+	Restore(tx *gorm.DB, roleId string) (*models.Role, error)
 }
 
-type RoleRepositoryImpl struct{
+// ==============================
+// Implementation
+// ==============================
+
+type RoleRepositoryImpl struct {
 	DB *gorm.DB
 }
 
@@ -29,21 +37,32 @@ func NewRoleRepository(db *gorm.DB) *RoleRepositoryImpl {
 	return &RoleRepositoryImpl{DB: db}
 }
 
-func (r *RoleRepositoryImpl) FindAll() ([]models.Role, error) {
+func (r *RoleRepositoryImpl) useDB(tx *gorm.DB) *gorm.DB {
+	if tx != nil {
+		return tx
+	}
+	return r.DB
+}
+
+// ---------- Reads ----------
+
+func (r *RoleRepositoryImpl) FindAll(tx *gorm.DB) ([]models.Role, error) {
 	var roles []models.Role
-	if err := r.DB.
-	 Unscoped().
-	 Find(&roles).Error; err != nil {
+	if err := r.useDB(tx).
+		Unscoped().
+		Find(&roles).Error; err != nil {
 		return nil, HandleDatabaseError(err, "role")
 	}
 	return roles, nil
 }
 
-func (r *RoleRepositoryImpl) FindAllPaginated(req *models.PaginationRequest) ([]models.Role, int64, error) {
-	var roles []models.Role
-	var totalCount int64
+func (r *RoleRepositoryImpl) FindAllPaginated(tx *gorm.DB, req *models.PaginationRequest) ([]models.Role, int64, error) {
+	var (
+		roles      []models.Role
+		totalCount int64
+	)
 
-	query := r.DB.Unscoped()
+	query := r.useDB(tx).Unscoped().Model(&models.Role{})
 
 	switch req.Status {
 	case "active":
@@ -51,25 +70,20 @@ func (r *RoleRepositoryImpl) FindAllPaginated(req *models.PaginationRequest) ([]
 	case "deleted":
 		query = query.Where("deleted_at IS NOT NULL")
 	case "all":
+		// no filter
 	default:
 		query = query.Where("deleted_at IS NULL")
 	}
 
-	if req.RoleID != "" {
-		if roleUUID, err := uuid.Parse(req.RoleID); err == nil {
-			query = query.Where("role_id = ?", roleUUID)
-		}
-	}
-
-	if req.Search != "" {
-		searchPattern := "%" + strings.ToLower(req.Search) + "%"
+	if s := strings.TrimSpace(req.Search); s != "" {
+		p := "%" + strings.ToLower(s) + "%"
 		query = query.Where(
-			"LOWER(name) LIKE ? OR LOWER(alias) LIKE ? OR LOWER(description) LIKE ? OR LOWER(color) LIKE ?",
-			searchPattern, searchPattern, searchPattern, searchPattern,
+			"LOWER(name) LIKE ? OR LOWER(alias) LIKE ? OR LOWER(COALESCE(description, '')) LIKE ? OR LOWER(COALESCE(color, '')) LIKE ?",
+			p, p, p, p,
 		)
 	}
 
-	if err := query.Model(&models.Role{}).Count(&totalCount).Error; err != nil {
+	if err := query.Count(&totalCount).Error; err != nil {
 		return nil, 0, HandleDatabaseError(err, "role")
 	}
 
@@ -81,89 +95,90 @@ func (r *RoleRepositoryImpl) FindAllPaginated(req *models.PaginationRequest) ([]
 	return roles, totalCount, nil
 }
 
-func (r *RoleRepositoryImpl) FindById(roleId string, isSoftDelete bool) (*models.Role, error) {
-	var role *models.Role
-	db := r.DB
-
-	if !isSoftDelete {
+func (r *RoleRepositoryImpl) FindById(tx *gorm.DB, roleId string, includeTrashed bool) (*models.Role, error) {
+	var role models.Role
+	db := r.useDB(tx)
+	if includeTrashed {
 		db = db.Unscoped()
 	}
 
 	if err := db.First(&role, "id = ?", roleId).Error; err != nil {
 		return nil, HandleDatabaseError(err, "role")
 	}
-	
-	return role, nil
+	return &role, nil
 }
 
-func (r *RoleRepositoryImpl) FindByName(roleName string) (*models.Role, error) {
-	var role *models.Role
-	if err := r.DB.Where("name = ?", roleName).First(&role).Error; err != nil {
+func (r *RoleRepositoryImpl) FindByName(tx *gorm.DB, roleName string) (*models.Role, error) {
+	var role models.Role
+	if err := r.useDB(tx).Where("name = ?", roleName).First(&role).Error; err != nil {
 		return nil, HandleDatabaseError(err, "role")
 	}
-	return role, nil
+	return &role, nil
 }
 
-func (r *RoleRepositoryImpl) FindByAlias(roleAlias string) (*models.Role, error) {
-	var role *models.Role
-	if err := r.DB.Where("alias = ?", roleAlias).First(&role).Error; err != nil {
+func (r *RoleRepositoryImpl) FindByAlias(tx *gorm.DB, roleAlias string) (*models.Role, error) {
+	var role models.Role
+	if err := r.useDB(tx).Where("alias = ?", roleAlias).First(&role).Error; err != nil {
 		return nil, HandleDatabaseError(err, "role")
 	}
-	return role, nil
+	return &role, nil
 }
 
-func (r *RoleRepositoryImpl) Insert(role *models.Role) (*models.Role, error) {
+// ---------- Mutations ----------
 
+func (r *RoleRepositoryImpl) Insert(tx *gorm.DB, role *models.Role) (*models.Role, error) {
 	if role.ID == uuid.Nil {
 		return nil, fmt.Errorf("role ID cannot be empty")
 	}
-
-	if err := r.DB.Create(&role).Error; err != nil {
+	if err := r.useDB(tx).Create(role).Error; err != nil {
 		return nil, HandleDatabaseError(err, "role")
 	}
 	return role, nil
 }
 
-func (r *RoleRepositoryImpl) Update(role *models.Role) (*models.Role, error) {
-
+func (r *RoleRepositoryImpl) Update(tx *gorm.DB, role *models.Role) (*models.Role, error) {
 	if role.ID == uuid.Nil {
 		return nil, fmt.Errorf("role ID cannot be empty")
 	}
-
-	if err := r.DB.Save(&role).Error; err != nil {
+	if err := r.useDB(tx).Save(role).Error; err != nil {
 		return nil, HandleDatabaseError(err, "role")
 	}
 	return role, nil
 }
 
-func (r *RoleRepositoryImpl) Delete(roleId string, isHardDelete bool) error {
-	var role *models.Role
+func (r *RoleRepositoryImpl) Delete(tx *gorm.DB, roleId string, isHardDelete bool) error {
+	db := r.useDB(tx)
 
-	if err := r.DB.Unscoped().First(&role, "id = ?", roleId).Error; err != nil {
+	var role models.Role
+	if err := db.Unscoped().First(&role, "id = ?", roleId).Error; err != nil {
 		return HandleDatabaseError(err, "role")
 	}
-	
+
 	if isHardDelete {
-		if err := r.DB.Unscoped().Delete(&role).Error; err != nil {
+		if err := db.Unscoped().Delete(&role).Error; err != nil {
 			return HandleDatabaseError(err, "role")
 		}
 	} else {
-		if err := r.DB.Delete(&role).Error; err != nil {
+		if err := db.Delete(&role).Error; err != nil {
 			return HandleDatabaseError(err, "role")
 		}
 	}
 	return nil
 }
 
-func (r *RoleRepositoryImpl) Restore(role *models.Role, roleId string) (*models.Role, error) {
-	if err := r.DB.Unscoped().Model(role).Where("id = ?", roleId).Update("deleted_at", nil).Error; err != nil {
-		return nil, err
+func (r *RoleRepositoryImpl) Restore(tx *gorm.DB, roleId string) (*models.Role, error) {
+	db := r.useDB(tx)
+
+	if err := db.Unscoped().
+		Model(&models.Role{}).
+		Where("id = ?", roleId).
+		Update("deleted_at", nil).Error; err != nil {
+		return nil, HandleDatabaseError(err, "role")
 	}
 
-	var restoredRole *models.Role
-	if err := r.DB.Unscoped().First(&restoredRole, "id = ?", roleId).Error; err != nil {
-		return nil, err
+	var restored models.Role
+	if err := db.First(&restored, "id = ?", roleId).Error; err != nil {
+		return nil, HandleDatabaseError(err, "role")
 	}
-	
-	return restoredRole, nil
+	return &restored, nil
 }

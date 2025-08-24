@@ -13,6 +13,7 @@ import (
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type UserService struct {
@@ -27,36 +28,35 @@ func NewUserService(userRepo repositories.UserRepository, uploadRepo repositorie
 	}
 }
 
-func (service *UserService) GetAllUsers(userInfo *models.User) ([]models.ResponseGetUser, error) {
-	users, err := service.UserRepository.FindAll()
+func (s *UserService) GetAllUsers(userInfo *models.User) ([]models.ResponseGetUser, error) {
+	users, err := s.UserRepository.FindAll(nil)
 	if err != nil {
 		return nil, err
 	}
 
-	usersResponse := []models.ResponseGetUser{}
-	for _, user := range users {
-		usersResponse = append(usersResponse, models.ResponseGetUser{
-			ID:          user.ID,
-			Username:    user.Username,
-			Name:        user.Name,
-			Email:       user.Email,
-			Address:     user.Address,
-			Phone:       user.Phone,
-			Avatar:      user.Avatar,
-			AvatarID:    user.AvatarID,
-			Role:        user.Role,
-			RoleID:      *user.RoleID,
-			Description: user.Description,
-			CreatedAt:   user.CreatedAt,
-			UpdatedAt:   user.UpdatedAt,
-			DeletedAt:   user.DeletedAt,
+	out := make([]models.ResponseGetUser, 0, len(users))
+	for _, u := range users {
+		out = append(out, models.ResponseGetUser{
+			ID:          u.ID,
+			Username:    u.Username,
+			Name:        u.Name,
+			Email:       u.Email,
+			Address:     u.Address,
+			Phone:       u.Phone,
+			Avatar:      u.Avatar,
+			AvatarID:    u.AvatarID,
+			Role:        u.Role,
+			RoleID:      *u.RoleID,
+			Description: u.Description,
+			CreatedAt:   u.CreatedAt,
+			UpdatedAt:   u.UpdatedAt,
+			DeletedAt:   u.DeletedAt,
 		})
 	}
-
-	return usersResponse, nil
+	return out, nil
 }
 
-func (service *UserService) GetAllUsersPaginated(req *models.PaginationRequest, userInfo *models.User) (*models.UserPaginatedResponse, error) {
+func (s *UserService) GetAllUsersPaginated(req *models.PaginationRequest, userInfo *models.User) (*models.UserPaginatedResponse, error) {
 	if req.Page <= 0 {
 		req.Page = 1
 	}
@@ -70,84 +70,104 @@ func (service *UserService) GetAllUsersPaginated(req *models.PaginationRequest, 
 		req.Status = "active"
 	}
 
-	users, totalCount, err := service.UserRepository.FindAllPaginated(req)
+	users, totalCount, err := s.UserRepository.FindAllPaginated(nil, req)
 	if err != nil {
 		return nil, err
 	}
 
-	usersResponse := []models.ResponseGetUser{}
-	for _, user := range users {
-		if strings.ToLower(userInfo.Role.Name) != "developer" && strings.ToLower(user.Role.Name) == "developer" {
+	resp := make([]models.ResponseGetUser, 0, len(users))
+	for _, u := range users {
+		if strings.ToLower(userInfo.Role.Name) != "developer" && strings.ToLower(u.Role.Name) == "developer" {
 			continue
 		}
-
-		usersResponse = append(usersResponse, models.ResponseGetUser{
-			ID:          user.ID,
-			Username:    user.Username,
-			Name:        user.Name,
-			Email:       user.Email,
-			Address:     user.Address,
-			Phone:       user.Phone,
-			Avatar:      user.Avatar,
-			AvatarID:    user.AvatarID,
-			Role:        user.Role,
-			RoleID:      *user.RoleID,
-			Description: user.Description,
-			CreatedAt:   user.CreatedAt,
-			UpdatedAt:   user.UpdatedAt,
-			DeletedAt:   user.DeletedAt,
+		resp = append(resp, models.ResponseGetUser{
+			ID:          u.ID,
+			Username:    u.Username,
+			Name:        u.Name,
+			Email:       u.Email,
+			Address:     u.Address,
+			Phone:       u.Phone,
+			Avatar:      u.Avatar,
+			AvatarID:    u.AvatarID,
+			Role:        u.Role,
+			RoleID:      *u.RoleID,
+			Description: u.Description,
+			CreatedAt:   u.CreatedAt,
+			UpdatedAt:   u.UpdatedAt,
+			DeletedAt:   u.DeletedAt,
 		})
 	}
 
 	totalPages := int((totalCount + int64(req.Limit) - 1) / int64(req.Limit))
-	hasNext := req.Page < totalPages
-	hasPrev := req.Page > 1
-
-	paginationResponse := models.PaginationResponse{
-		CurrentPage:  req.Page,
-		PerPage:      req.Limit,
-		TotalPages:   totalPages,
-		TotalRecords: totalCount,
-		HasNext:      hasNext,
-		HasPrev:      hasPrev,
-	}
-
 	return &models.UserPaginatedResponse{
-		Data:       usersResponse,
-		Pagination: paginationResponse,
+		Data: resp,
+		Pagination: models.PaginationResponse{
+			CurrentPage:  req.Page,
+			PerPage:      req.Limit,
+			TotalPages:   totalPages,
+			TotalRecords: totalCount,
+			HasNext:      req.Page < totalPages,
+			HasPrev:      req.Page > 1,
+		},
 	}, nil
 }
 
-func (service *UserService) CreateUser(userRequest *models.UserCreate, ctx *fiber.Ctx, userInfo *models.User) (*models.User, error) {
-	if _, err := service.UserRepository.FindByEmailOrUsername(userRequest.Email); err == nil {
-		return nil, errors.New("email or username already exists")
-	} else if err != repositories.ErrUserNotFound {
-		return nil, errors.New("error checking email: " + err.Error())
+func (s *UserService) GetUserByID(userId string, userInfo *models.User) (*models.User, error) {
+	u, err := s.UserRepository.FindById(nil, userId, false)
+	if err != nil {
+		return nil, err
 	}
 
-	if userRequest.Username != userRequest.Email {
-		if _, err := service.UserRepository.FindByEmailOrUsername(userRequest.Username); err == nil {
+	return &models.User{
+		ID:          u.ID,
+		Username:    u.Username,
+		Name:        u.Name,
+		Email:       u.Email,
+		Address:     u.Address,
+		Phone:       u.Phone,
+		Avatar:      u.Avatar,
+		AvatarID:    u.AvatarID,
+		Role:        u.Role,
+		RoleID:      u.RoleID,
+		Description: u.Description,
+		CreatedAt:   u.CreatedAt,
+		UpdatedAt:   u.UpdatedAt,
+		DeletedAt:   u.DeletedAt,
+	}, nil
+}
+
+func (s *UserService) CreateUser(in *models.UserCreate, ctx *fiber.Ctx, userInfo *models.User) (*models.User, error) {
+	// Unik email
+	if _, err := s.UserRepository.FindByEmailOrUsername(nil, in.Email); err == nil {
+		return nil, errors.New("email or username already exists")
+	} else if err != repositories.ErrUserNotFound {
+		return nil, fmt.Errorf("error checking email: %w", err)
+	}
+
+	// Unik username (kalau beda dengan email)
+	if in.Username != in.Email {
+		if _, err := s.UserRepository.FindByEmailOrUsername(nil, in.Username); err == nil {
 			return nil, errors.New("email or username already exists")
 		} else if err != repositories.ErrUserNotFound {
-			return nil, errors.New("error checking username: " + err.Error())
+			return nil, fmt.Errorf("error checking username: %w", err)
 		}
 	}
 
-	passwordHash, err := helpers.HashPassword(userRequest.Password)
+	passwordHash, err := helpers.HashPassword(in.Password)
 	if err != nil {
 		return nil, fmt.Errorf("error hashing password: %w", err)
 	}
 
-	newUser := &models.User{
+	u := &models.User{
 		ID:          uuid.New(),
-		Username:    userRequest.Username,
-		Name:        userRequest.Name,
-		Email:       userRequest.Email,
-		Address:     userRequest.Address,
-		Phone:       userRequest.Phone,
+		Username:    in.Username,
+		Name:        in.Name,
+		Email:       in.Email,
+		Address:     in.Address,
+		Phone:       in.Phone,
 		Password:    passwordHash,
-		RoleID:      &userRequest.RoleID,
-		Description: userRequest.Description,
+		RoleID:      &in.RoleID,
+		Description: in.Description,
 	}
 
 	var avatarUUIDStr string
@@ -155,7 +175,6 @@ func (service *UserService) CreateUser(userRequest *models.UserCreate, ctx *fibe
 	if tx.Error != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
 	}
-
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
@@ -165,34 +184,33 @@ func (service *UserService) CreateUser(userRequest *models.UserCreate, ctx *fibe
 		}
 	}()
 
-	file, err := ctx.FormFile("avatar")
-	if err == nil && file != nil {
+	// Handle avatar (opsional)
+	if file, ferr := ctx.FormFile("avatar"); ferr == nil && file != nil {
 		avatarUUIDStr, err = helpers.SaveFile(ctx, file, "users")
 		if err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf("failed to save avatar: %w", err)
 		}
-
 		avatarUUID, err := uuid.Parse(avatarUUIDStr)
 		if err != nil {
 			tx.Rollback()
 			helpers.DeleteLocalFileImmediate(avatarUUIDStr)
 			return nil, fmt.Errorf("invalid avatar UUID: %w", err)
 		}
-		newUser.AvatarID = &avatarUUID
+		u.AvatarID = &avatarUUID
 	}
 
-	result := tx.Create(newUser)
-	if result.Error != nil {
+	created, err := s.UserRepository.Insert(tx, u)
+	if err != nil {
 		tx.Rollback()
 		if avatarUUIDStr != "" {
 			helpers.DeleteLocalFileImmediate(avatarUUIDStr)
 		}
-		
-		if strings.Contains(result.Error.Error(), "duplicate key") {
+		// Normalisasi pesan duplicate
+		if strings.Contains(err.Error(), "duplicate") {
 			return nil, errors.New("email or username already exists")
 		}
-		return nil, fmt.Errorf("error creating user: %w", result.Error)
+		return nil, fmt.Errorf("error creating user: %w", err)
 	}
 
 	if err := tx.Commit().Error; err != nil {
@@ -202,63 +220,64 @@ func (service *UserService) CreateUser(userRequest *models.UserCreate, ctx *fibe
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	insertedUser, err := service.UserRepository.FindById(newUser.ID.String(), true)
+	// fetch ulang (dengan preload) di outside tx
+	out, err := s.UserRepository.FindById(nil, created.ID.String(), true)
 	if err != nil {
 		log.Printf("Warning: User created but failed to fetch created data: %v", err)
-		return newUser, nil
+		return created, nil
 	}
-
-	return insertedUser, nil
+	return out, nil
 }
 
-func (service *UserService) UpdateUser(userRequest *models.UserUpdate, userId string, ctx *fiber.Ctx, userInfo *models.User) (*models.User, error) {
-	user, err := service.UserRepository.FindById(userId, true)
+func (s *UserService) UpdateUser(in *models.UserUpdate, userId string, ctx *fiber.Ctx, userInfo *models.User) (*models.User, error) {
+	user, err := s.UserRepository.FindById(nil, userId, true)
 	if err != nil {
 		return nil, fmt.Errorf("error finding user: %w", err)
 	}
 
-	if userRequest.Email != "" && userRequest.Email != user.Email {
-		existingUser, err := service.UserRepository.FindByEmailOrUsername(userRequest.Email)
-		if err == nil && existingUser.ID != user.ID {
+	// Validasi unik
+	if in.Email != "" && in.Email != user.Email {
+		ex, err := s.UserRepository.FindByEmailOrUsername(nil, in.Email)
+		if err == nil && ex.ID != user.ID {
 			return nil, errors.New("email or username already exists")
-		} else if err != repositories.ErrUserNotFound {
+		} else if err != nil && err != repositories.ErrUserNotFound {
 			return nil, fmt.Errorf("error checking existing email: %w", err)
 		}
 	}
-
-	if userRequest.Username != "" && userRequest.Username != user.Username {
-		existingUser, err := service.UserRepository.FindByEmailOrUsername(userRequest.Username)
-		if err == nil && existingUser.ID != user.ID {
+	if in.Username != "" && in.Username != user.Username {
+		ex, err := s.UserRepository.FindByEmailOrUsername(nil, in.Username)
+		if err == nil && ex.ID != user.ID {
 			return nil, errors.New("email or username already exists")
-		} else if err != repositories.ErrUserNotFound {
+		} else if err != nil && err != repositories.ErrUserNotFound {
 			return nil, fmt.Errorf("error checking existing username: %w", err)
 		}
 	}
 
-	if userRequest.Email != "" && userRequest.Email != user.Email {
-		user.Email = userRequest.Email
+	// Map perubahan
+	if in.Email != "" && in.Email != user.Email {
+		user.Email = in.Email
 	}
-	if userRequest.Name != "" && userRequest.Name != user.Name {
-		user.Name = userRequest.Name
+	if in.Name != "" && in.Name != user.Name {
+		user.Name = in.Name
 	}
-	if userRequest.Username != "" && userRequest.Username != user.Username {
-		user.Username = userRequest.Username
+	if in.Username != "" && in.Username != user.Username {
+		user.Username = in.Username
 	}
-	if userRequest.Address != "" {
-		user.Address = userRequest.Address
+	if in.Address != "" {
+		user.Address = in.Address
 	}
-	if userRequest.Phone != "" {
-		user.Phone = userRequest.Phone
+	if in.Phone != "" {
+		user.Phone = in.Phone
 	}
-	if userRequest.Description != "" {
-		user.Description = userRequest.Description
+	if in.Description != "" {
+		user.Description = in.Description
 	}
-	if userRequest.RoleID != uuid.Nil && (user.RoleID == nil || *user.RoleID != userRequest.RoleID) {
-		user.RoleID = &userRequest.RoleID
+	if in.RoleID != uuid.Nil && (user.RoleID == nil || *user.RoleID != in.RoleID) {
+		user.RoleID = &in.RoleID
 	}
 
-	file, err := ctx.FormFile("avatar")
-	if err == nil && file != nil {
+	// Jika ada avatar baru: proses dalam transaksi terpisah
+	if file, ferr := ctx.FormFile("avatar"); ferr == nil && file != nil {
 		oldAvatarID := user.AvatarID
 		var newAvatarUUIDStr string
 		var newAvatarID uuid.UUID
@@ -267,7 +286,6 @@ func (service *UserService) UpdateUser(userRequest *models.UserUpdate, userId st
 		if tx.Error != nil {
 			return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
 		}
-
 		defer func() {
 			if r := recover(); r != nil {
 				tx.Rollback()
@@ -277,12 +295,11 @@ func (service *UserService) UpdateUser(userRequest *models.UserUpdate, userId st
 			}
 		}()
 
-		newAvatarUUIDStr, err := helpers.SaveFile(ctx, file, "users")
+		newAvatarUUIDStr, err = helpers.SaveFile(ctx, file, "users")
 		if err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf("failed to save avatar: %w", err)
 		}
-
 		newAvatarID, err = uuid.Parse(newAvatarUUIDStr)
 		if err != nil {
 			tx.Rollback()
@@ -292,21 +309,14 @@ func (service *UserService) UpdateUser(userRequest *models.UserUpdate, userId st
 
 		user.Avatar = nil
 		user.AvatarID = &newAvatarID
-		result := tx.Model(user).Select("*").Updates(user)
-		if result.Error != nil {
+
+		if _, err := s.UserRepository.Update(tx, user); err != nil {
 			tx.Rollback()
 			helpers.DeleteLocalFileImmediate(newAvatarUUIDStr)
-			
-			if strings.Contains(result.Error.Error(), "duplicate key") {
+			if strings.Contains(err.Error(), "duplicate") {
 				return nil, errors.New("email or username already exists")
 			}
-			return nil, fmt.Errorf("error updating user with avatar: %w", result.Error)
-		}
-
-		if result.RowsAffected == 0 {
-			tx.Rollback()
-			helpers.DeleteLocalFileImmediate(newAvatarUUIDStr)
-			return nil, errors.New("no rows affected, user may not exist")
+			return nil, fmt.Errorf("error updating user with avatar: %w", err)
 		}
 
 		if err := tx.Commit().Error; err != nil {
@@ -314,36 +324,36 @@ func (service *UserService) UpdateUser(userRequest *models.UserUpdate, userId st
 			return nil, fmt.Errorf("failed to commit transaction: %w", err)
 		}
 
-		updatedUser, err := service.UserRepository.FindById(user.ID.String(), true)
+		updated, err := s.UserRepository.FindById(nil, user.ID.String(), true)
 		if err != nil {
 			log.Printf("Warning: User updated but failed to fetch updated data: %v", err)
 			return user, nil
 		}
 
+		// Hapus avatar lama setelah commit
 		if oldAvatarID != nil {
-			go func() {
-				if err := helpers.DeleteLocalFileImmediate(oldAvatarID.String()); err != nil {
-					log.Printf("Warning: Failed to delete old avatar file %s: %v", oldAvatarID.String(), err)
+			go func(id string) {
+				if err := helpers.DeleteLocalFileImmediate(id); err != nil {
+					log.Printf("Warning: Failed to delete old avatar file %s: %v", id, err)
 				}
-			}()
+			}(oldAvatarID.String())
 		}
-
-		return updatedUser, nil
+		return updated, nil
 	}
 
-	updatedUser, err := service.UserRepository.Update(user)
+	// Tanpa avatar baru: update biasa
+	updated, err := s.UserRepository.Update(nil, user)
 	if err != nil {
-		if strings.Contains(err.Error(), "duplicate key value violates unique constraint") {
+		if strings.Contains(err.Error(), "duplicate") {
 			return nil, errors.New("email or username already exists")
 		}
 		return nil, fmt.Errorf("error updating user: %w", err)
 	}
-
-	return updatedUser, nil
+	return updated, nil
 }
 
-func (service *UserService) UpdateUserProfile(userID string, userUpdate *models.UserUpdateProfileRequest) (*models.User, error) {
-	user, err := service.UserRepository.FindById(userID, true)
+func (s *UserService) UpdateUserProfile(userID string, in *models.UserUpdateProfileRequest) (*models.User, error) {
+	user, err := s.UserRepository.FindById(nil, userID, true)
 	if err != nil {
 		if err == repositories.ErrUserNotFound {
 			return nil, errors.New("user not found")
@@ -351,43 +361,41 @@ func (service *UserService) UpdateUserProfile(userID string, userUpdate *models.
 		return nil, fmt.Errorf("error finding user: %w", err)
 	}
 
-	if userUpdate.Email != "" && userUpdate.Email != user.Email {
-		existingUser, err := service.UserRepository.FindByEmailOrUsername(userUpdate.Email)
+	if in.Email != "" && in.Email != user.Email {
+		ex, err := s.UserRepository.FindByEmailOrUsername(nil, in.Email)
 		switch {
-		case err == nil && existingUser.ID != user.ID:
+		case err == nil && ex.ID != user.ID:
 			return nil, errors.New("email already exists")
 		case err != nil && err != repositories.ErrUserNotFound:
 			return nil, fmt.Errorf("error checking existing email: %w", err)
 		}
-		user.Email = userUpdate.Email
+		user.Email = in.Email
+	}
+	if in.Name != "" && in.Name != user.Name {
+		user.Name = in.Name
+	}
+	if in.Address != "" {
+		user.Address = in.Address
+	}
+	if in.Phone != "" {
+		user.Phone = in.Phone
+	}
+	if in.Description != "" {
+		user.Description = in.Description
 	}
 
-	if userUpdate.Name != "" && userUpdate.Name != user.Name {
-		user.Name = userUpdate.Name
-	}
-	if userUpdate.Address != "" {
-		user.Address = userUpdate.Address
-	}
-	if userUpdate.Phone != "" {
-		user.Phone = userUpdate.Phone
-	}
-	if userUpdate.Description != "" {
-		user.Description = userUpdate.Description
-	}
-
-	updatedUser, err := service.UserRepository.Update(user)
+	updated, err := s.UserRepository.Update(nil, user)
 	if err != nil {
-		if strings.Contains(err.Error(), "duplicate key value violates unique constraint") {
+		if strings.Contains(err.Error(), "duplicate") {
 			return nil, errors.New("email already exists")
 		}
 		return nil, fmt.Errorf("error updating user: %w", err)
 	}
-
-	return updatedUser, nil
+	return updated, nil
 }
 
-func (service *UserService) UpdateAvatarOnly(userId string, ctx *fiber.Ctx) (*models.User, error) {
-	user, err := service.UserRepository.FindById(userId, true)
+func (s *UserService) UpdateAvatarOnly(userId string, ctx *fiber.Ctx) (*models.User, error) {
+	user, err := s.UserRepository.FindById(nil, userId, true)
 	if err != nil {
 		if err == repositories.ErrUserNotFound {
 			return nil, errors.New("user not found")
@@ -411,7 +419,6 @@ func (service *UserService) UpdateAvatarOnly(userId string, ctx *fiber.Ctx) (*mo
 	if tx.Error != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
 	}
-
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
@@ -434,22 +441,13 @@ func (service *UserService) UpdateAvatarOnly(userId string, ctx *fiber.Ctx) (*mo
 		return nil, fmt.Errorf("invalid avatar UUID: %w", err)
 	}
 
+	// Minimal update kolom
+	_ = time.Now() // keep behavior align with previous code
 	user.AvatarID = &newAvatarID
-	result := tx.Model(user).Select("avatar_id", "updated_at").Updates(map[string]interface{}{
-		"avatar_id":  newAvatarID,
-		"updated_at": time.Now(),
-	})
-
-	if result.Error != nil {
+	if _, err := s.UserRepository.Update(tx, user); err != nil {
 		tx.Rollback()
 		helpers.DeleteLocalFileImmediate(newAvatarUUIDStr)
-		return nil, fmt.Errorf("error updating user avatar_id: %w", result.Error)
-	}
-
-	if result.RowsAffected == 0 {
-		tx.Rollback()
-		helpers.DeleteLocalFileImmediate(newAvatarUUIDStr)
-		return nil, errors.New("no rows affected, user may not exist")
+		return nil, fmt.Errorf("error updating user avatar_id: %w", err)
 	}
 
 	if err := tx.Commit().Error; err != nil {
@@ -457,125 +455,96 @@ func (service *UserService) UpdateAvatarOnly(userId string, ctx *fiber.Ctx) (*mo
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	updatedUser, err := service.UserRepository.FindById(userId, true)
+	updated, err := s.UserRepository.FindById(nil, userId, true)
 	if err != nil {
 		log.Printf("Warning: User updated but failed to fetch updated data: %v", err)
 		return user, nil
 	}
 
 	if oldAvatarID != nil {
-		go func() {
-			if err := helpers.DeleteLocalFileImmediate(oldAvatarID.String()); err != nil {
-				log.Printf("Warning: Failed to delete old avatar file %s: %v", oldAvatarID.String(), err)
+		go func(id string) {
+			if err := helpers.DeleteLocalFileImmediate(id); err != nil {
+				log.Printf("Warning: Failed to delete old avatar file %s: %v", id, err)
 			}
-		}()
+		}(oldAvatarID.String())
 	}
-
-	return updatedUser, nil
+	return updated, nil
 }
 
-func (service *UserService) DeleteUsers(userRequest *models.UserIsHardDeleteRequest, ctx *fiber.Ctx, userInfo *models.User) error {
-	for _, userId := range userRequest.IDs {
+func (s *UserService) DeleteUsers(in *models.UserIsHardDeleteRequest, ctx *fiber.Ctx, userInfo *models.User) error {
+	for _, id := range in.IDs {
 		tx := configs.DB.Begin()
 		if tx.Error != nil {
-			log.Printf("Failed to begin transaction for user %v: %v\n", userId, tx.Error)
+			log.Printf("Failed to begin transaction for user %v: %v\n", id, tx.Error)
 			return errors.New("error beginning transaction")
 		}
 
-		user, err := service.UserRepository.FindById(userId.String(), false)
+		u, err := s.UserRepository.FindById(tx, id.String(), true)
 		if err != nil {
 			tx.Rollback()
-			if err == repositories.ErrUserNotFound {
-				log.Printf("User not found: %v\n", userId)
+			if err == repositories.ErrUserNotFound || errors.Is(err, gorm.ErrRecordNotFound) {
+				log.Printf("User not found: %v\n", id)
 				continue
 			}
-			log.Printf("Error finding user %v: %v\n", userId, err)
+			log.Printf("Error finding user %v: %v\n", id, err)
 			return errors.New("error finding user")
 		}
 
-		if userRequest.IsHardDelete == "hardDelete" {
-			if user.AvatarID != nil && user.AvatarID.String() != "" {
-				if err := tx.Unscoped().Delete(&models.User{}, "id = ?", userId).Error; err != nil {
-					tx.Rollback()
-					log.Printf("Error hard deleting user %v: %v\n", userId, err)
-					return errors.New("error hard deleting user")
-				}
-
-				if err := tx.Commit().Error; err != nil {
-					log.Printf("Error committing hard delete for user %v: %v\n", userId, err)
-					return errors.New("error committing hard delete")
-				}
-
-				go func(avatarID string) {
-					if err := helpers.DeleteLocalFileImmediate(avatarID); err != nil {
-						log.Printf("Warning: Failed to delete avatar file %s: %v", avatarID, err)
-					}
-				}(user.AvatarID.String())
-			} else {
-				if err := tx.Unscoped().Delete(&models.User{}, "id = ?", userId).Error; err != nil {
-					tx.Rollback()
-					log.Printf("Error hard deleting user %v: %v\n", userId, err)
-					return errors.New("error hard deleting user")
-				}
-
-				if err := tx.Commit().Error; err != nil {
-					log.Printf("Error committing hard delete for user %v: %v\n", userId, err)
-					return errors.New("error committing hard delete")
-				}
-			}
-		} else {
-			if err := tx.Delete(&models.User{}, "id = ?", userId).Error; err != nil {
-				tx.Rollback()
-				log.Printf("Error soft deleting user %v: %v\n", userId, err)
-				return errors.New("error soft deleting user")
-			}
-
-			if err := tx.Commit().Error; err != nil {
-				log.Printf("Error committing soft delete for user %v: %v\n", userId, err)
-				return errors.New("error committing soft delete")
-			}
-		}
-	}
-
-	return nil
-}
-
-func (service *UserService) RestoreUsers(userRequest *models.UserRestoreRequest, ctx *fiber.Ctx, userInfo *models.User) ([]models.User, error) {
-	var restoredUsers []models.User
-
-	for _, userId := range userRequest.IDs {
-		tx := configs.DB.Begin()
-		if tx.Error != nil {
-			log.Printf("Failed to begin transaction for user restore %v: %v\n", userId, tx.Error)
-			return nil, errors.New("error beginning transaction")
-		}
-
-		result := tx.Model(&models.User{}).Unscoped().Where("id = ?", userId).Update("deleted_at", nil)
-		if result.Error != nil {
+		isHard := in.IsHardDelete == "hardDelete"
+		if err := s.UserRepository.Delete(tx, id.String(), isHard); err != nil {
 			tx.Rollback()
-			log.Printf("Error restoring user %v: %v\n", userId, result.Error)
-			return nil, errors.New("error restoring user")
-		}
-
-		if result.RowsAffected == 0 {
-			tx.Rollback()
-			log.Printf("User not found for restore: %v\n", userId)
-			continue
+			log.Printf("Error deleting user %v: %v\n", id, err)
+			return errors.New("error deleting user")
 		}
 
 		if err := tx.Commit().Error; err != nil {
-			log.Printf("Error committing user restore %v: %v\n", userId, err)
+			log.Printf("Error committing delete for user %v: %v\n", id, err)
+			return errors.New("error committing delete")
+		}
+
+		// Hapus file avatar setelah commit jika hard delete
+		if isHard && u.AvatarID != nil && u.AvatarID.String() != "" {
+			go func(avatarID string) {
+				if err := helpers.DeleteLocalFileImmediate(avatarID); err != nil {
+					log.Printf("Warning: Failed to delete avatar file %s: %v", avatarID, err)
+				}
+			}(u.AvatarID.String())
+		}
+	}
+	return nil
+}
+
+func (s *UserService) RestoreUsers(in *models.UserRestoreRequest, ctx *fiber.Ctx, userInfo *models.User) ([]models.User, error) {
+	var restored []models.User
+	for _, id := range in.IDs {
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			log.Printf("Failed to begin transaction for user restore %v: %v\n", id, tx.Error)
+			return nil, errors.New("error beginning transaction")
+		}
+
+		res, err := s.UserRepository.Restore(tx, id.String())
+		if err != nil {
+			tx.Rollback()
+			if err == repositories.ErrUserNotFound || errors.Is(err, gorm.ErrRecordNotFound) {
+				log.Printf("User not found for restore: %v\n", id)
+				continue
+			}
+			log.Printf("Error restoring user %v: %v\n", id, err)
+			return nil, errors.New("error restoring user")
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			log.Printf("Error committing user restore %v: %v\n", id, err)
 			return nil, errors.New("error committing user restore")
 		}
 
-		restoredUser, err := service.UserRepository.FindById(userId.String(), true)
-		if err != nil {
-			log.Printf("Error fetching restored user %v: %v\n", userId, err)
+		restoredUser, ferr := s.UserRepository.FindById(nil, res.ID.String(), true)
+		if ferr != nil {
+			log.Printf("Error fetching restored user %v: %v\n", id, ferr)
 			continue
 		}
-
-		restoredUsers = append(restoredUsers, *restoredUser)
+		restored = append(restored, *restoredUser)
 	}
-
-	return restoredUsers, nil
+	return restored, nil
 }

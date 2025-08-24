@@ -16,6 +16,7 @@ type SalesPerson struct {
 	Email    *string    `gorm:"size:120" json:"email,omitempty"`
 	HireDate *time.Time `json:"hire_date,omitempty"`
 	Address  *string    `gorm:"size:255" json:"address,omitempty"`
+	NPWP					*string    `gorm:"size:30" json:"npwp,omitempty"`
 
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
@@ -31,6 +32,7 @@ type ResponseGetSalesPerson struct {
 	Email *string   `json:"email,omitempty"`
 	HireDate *time.Time `json:"hire_date,omitempty"`
 	Address  *string    `gorm:"size:255" json:"address,omitempty"`
+	NPWP    *string    `gorm:"size:30" json:"npwp,omitempty"`
 
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
@@ -45,6 +47,7 @@ type SalesPersonCreateRequest struct {
 	Email    *string    `json:"email,omitempty"`
 	HireDate *time.Time `json:"hire_date,omitempty"`
 	Address  *string    `json:"address,omitempty"`
+	NPWP     *string    `json:"npwp,omitempty"`
 }
 
 type SalesPersonUpdateRequest struct {
@@ -53,6 +56,7 @@ type SalesPersonUpdateRequest struct {
 	Email    *string    `json:"email,omitempty"`
 	HireDate *time.Time `json:"hire_date,omitempty"`
 	Address  *string    `json:"address,omitempty"`
+	NPWP     *string    `json:"npwp,omitempty"`
 }
 
 type SalesPersonIsHardDeleteRequest struct {

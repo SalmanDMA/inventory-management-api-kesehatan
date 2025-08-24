@@ -29,14 +29,16 @@ func RouteInit(app *fiber.App) {
 	ItemRoutes(v1)
 	ItemHistoryRoutes(v1)
 	AreaRoutes(v1)
-	FacilityRoutes(v1)
-	FacilityTypeRoutes(v1)
+	CustomerRoutes(v1)
+	CustomerTypeRoutes(v1)
 	SalesPersonRoutes(v1)
 	SupplierRoutes(v1)
 	PurchaseOrderRoutes(v1)
 	PaymentRoutes(v1)
 	SalesOrderRoutes(v1)
 	NotificationRoutes(v1)
+	SalesReportRoutes(v1)
+	UoMRoutes(v1)
 }
 
 // HealthCheck godoc

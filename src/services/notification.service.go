@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/SalmanDMA/inventory-app/backend/src/configs"
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
 	"github.com/gofiber/fiber/v2"
@@ -22,116 +23,152 @@ func NewNotificationService(notificationRepo repositories.NotificationRepository
 }
 
 func (service *NotificationService) GetAllNotifications(userInfo *models.User) ([]models.ResponseGetNotification, error) {
-	var notifications []models.Notification
-	var err error
-
-	if userInfo.Role.Name == "DEVELOPER" {
-		notifications, err = service.NotificationRepository.FindAll()
-	} else {
-		notifications, err = service.NotificationRepository.FindByUserID(userInfo.ID)
-	}
-
+	notifications, err := service.NotificationRepository.FindByUserID(nil, userInfo.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	var notificationsResponse []models.ResponseGetNotification
-	for _, notification := range notifications {
-		notificationsResponse = append(notificationsResponse, models.ResponseGetNotification{
-			ID:         notification.ID,
-			UserID:     notification.UserID,
-			Title:      notification.Title,
-			Type:       notification.Type,
-			Message:    notification.Message,
-			IsRead:     notification.IsRead,
-			ReadAt:     notification.ReadAt,
-			Metadata:   notification.Metadata,
-			User:       notification.User,
-			CreatedAt:  notification.CreatedAt,
-			UpdatedAt:  notification.UpdatedAt,
-			DeletedAt:  notification.DeletedAt,
+	var out []models.ResponseGetNotification
+	for _, n := range notifications {
+		out = append(out, models.ResponseGetNotification{
+			ID:        n.ID,
+			UserID:    n.UserID,
+			Title:     n.Title,
+			Type:      n.Type,
+			Message:   n.Message,
+			IsRead:    n.IsRead,
+			ReadAt:    n.ReadAt,
+			Metadata:  n.Metadata,
+			User:      n.User,
+			CreatedAt: n.CreatedAt,
+			UpdatedAt: n.UpdatedAt,
+			DeletedAt: n.DeletedAt,
 		})
 	}
-
-	return notificationsResponse, nil
+	return out, nil
 }
 
 func (service *NotificationService) GetNotificationByID(notificationId string) (*models.ResponseGetNotification, error) {
-	notification, err := service.NotificationRepository.FindById(notificationId, false)
-
+	n, err := service.NotificationRepository.FindById(nil,notificationId, false)
 	if err != nil {
 		return nil, err
 	}
 
 	return &models.ResponseGetNotification{
-		 ID:          notification.ID,
-		 UserID:      notification.UserID,
-		 Title:       notification.Title,
-		 Type:        notification.Type,
-		 Message:     notification.Message,
-		 IsRead:      notification.IsRead,
-		 ReadAt:      notification.ReadAt,
-		 Metadata:    notification.Metadata,
-		 User:        notification.User,
+		ID:        n.ID,
+		UserID:    n.UserID,
+		Title:     n.Title,
+		Type:      n.Type,
+		Message:   n.Message,
+		IsRead:    n.IsRead,
+		ReadAt:    n.ReadAt,
+		Metadata:  n.Metadata,
+		User:      n.User,
+		CreatedAt: n.CreatedAt,
+		UpdatedAt: n.UpdatedAt,
+		DeletedAt: n.DeletedAt,
 	}, nil
 }
 
 func (service *NotificationService) MarkAllAsRead(userID uuid.UUID, ctx *fiber.Ctx, userInfo *models.User) error {
-	notifications, err := service.NotificationRepository.FindUnreadByUserID(userID)
+	_ = ctx
+	_ = userInfo
+
+	notifications, err := service.NotificationRepository.FindUnreadByUserID(nil, userID)
 	if err != nil {
 		return err
 	}
+	if len(notifications) == 0 {
+		return nil
+	}
 
-	for _, notification := range notifications {
-		notification.IsRead = true
-		notification.ReadAt = &time.Time{}
-		*notification.ReadAt = time.Now()
-		
-		_, err := service.NotificationRepository.Update(&notification)
-		if err != nil {
-			log.Printf("Error updating notification %v: %v\n", notification.ID, err)
-			continue
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	now := time.Now()
+	for i := range notifications {
+		notifications[i].IsRead = true
+		notifications[i].ReadAt = &now
+
+		if _, err := service.NotificationRepository.Update(tx, &notifications[i]); err != nil {
+			_ = tx.Rollback()
+			log.Printf("Error updating notification %v: %v\n", notifications[i].ID, err)
+			return err
 		}
 	}
 
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
 	return nil
 }
 
 func (service *NotificationService) MarkMultipleAsRead(notificationIDs []uuid.UUID, userID uuid.UUID, ctx *fiber.Ctx, userInfo *models.User) error {
-	for _, notificationID := range notificationIDs {
-		notification, err := service.NotificationRepository.FindById(notificationID.String(), false)
+	_ = ctx
+	_ = userInfo
+
+	if len(notificationIDs) == 0 {
+		return nil
+	}
+
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	now := time.Now()
+	for _, id := range notificationIDs {
+		n, err := service.NotificationRepository.FindById(tx, id.String(), false)
 		if err != nil {
 			if err == repositories.ErrNotificationNotFound {
-				log.Printf("Notification not found: %v\n", notificationID)
+				log.Printf("Notification not found: %v\n", id)
 				continue
 			}
-			log.Printf("Error finding notification %v: %v\n", notificationID, err)
+			_ = tx.Rollback()
+			log.Printf("Error finding notification %v: %v\n", id, err)
+			return err
+		}
+
+		if n.UserID != userID {
+			log.Printf("User %v trying to mark notification %v that doesn't belong to them\n", userID, id)
 			continue
 		}
 
-		if notification.UserID != userID {
-			log.Printf("User %v trying to mark notification %v that doesn't belong to them\n", userID, notificationID)
-			continue
-		}
+		if !n.IsRead {
+			n.IsRead = true
+			n.ReadAt = &now
 
-		if !notification.IsRead {
-			notification.IsRead = true
-			notification.ReadAt = &time.Time{}
-			*notification.ReadAt = time.Now()
-			
-			_, err := service.NotificationRepository.Update(notification)
-			if err != nil {
-				log.Printf("Error updating notification %v: %v\n", notificationID, err)
-				continue
+			if _, err := service.NotificationRepository.Update(tx, n); err != nil {
+				_ = tx.Rollback()
+				log.Printf("Error updating notification %v: %v\n", id, err)
+				return err
 			}
 		}
 	}
 
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
 	return nil
 }
 
 func (service *NotificationService) MarkAsRead(notificationID string, userID uuid.UUID, ctx *fiber.Ctx, userInfo *models.User) (*models.ResponseGetNotification, error) {
-	notification, err := service.NotificationRepository.FindById(notificationID, false)
+	_ = ctx
+	_ = userInfo
+
+	n, err := service.NotificationRepository.FindById(nil, notificationID, false)
 	if err != nil {
 		if err == repositories.ErrNotificationNotFound {
 			return nil, errors.New("notification not found")
@@ -139,99 +176,130 @@ func (service *NotificationService) MarkAsRead(notificationID string, userID uui
 		return nil, err
 	}
 
-	// Check if user owns this notification
-	if notification.UserID != userID {
+	if n.UserID != userID {
 		return nil, errors.New("forbidden: you can only mark your own notifications as read")
 	}
 
-	if !notification.IsRead {
-		notification.IsRead = true
-		notification.ReadAt = &time.Time{}
-		*notification.ReadAt = time.Now()
-		
-		updatedNotification, err := service.NotificationRepository.Update(notification)
-		if err != nil {
-			return nil, err
-		}
-
+	if n.IsRead {
 		return &models.ResponseGetNotification{
-			ID:          updatedNotification.ID,
-			UserID:      updatedNotification.UserID,
-			Title:       updatedNotification.Title,
-			Type:        updatedNotification.Type,
-			Message:     updatedNotification.Message,
-			IsRead:      updatedNotification.IsRead,
-			ReadAt:      updatedNotification.ReadAt,
-			Metadata:    updatedNotification.Metadata,
-			User:        updatedNotification.User,
-			CreatedAt:   updatedNotification.CreatedAt,
-			UpdatedAt:   updatedNotification.UpdatedAt,
-			DeletedAt:   updatedNotification.DeletedAt,
+			ID:        n.ID,
+			UserID:    n.UserID,
+			Title:     n.Title,
+			Type:      n.Type,
+			Message:   n.Message,
+			IsRead:    n.IsRead,
+			ReadAt:    n.ReadAt,
+			Metadata:  n.Metadata,
+			User:      n.User,
+			CreatedAt: n.CreatedAt,
+			UpdatedAt: n.UpdatedAt,
+			DeletedAt: n.DeletedAt,
 		}, nil
 	}
 
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	now := time.Now()
+	n.IsRead = true
+	n.ReadAt = &now
+
+	updated, err := service.NotificationRepository.Update(tx, n)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return nil, err
+	}
+
 	return &models.ResponseGetNotification{
-		ID:          notification.ID,
-		UserID:      notification.UserID,
-		Title:       notification.Title,
-		Type:        notification.Type,
-		Message:     notification.Message,
-		IsRead:      notification.IsRead,
-		ReadAt:      notification.ReadAt,
-		Metadata:    notification.Metadata,
-		User:        notification.User,
-		CreatedAt:   notification.CreatedAt,
-		UpdatedAt:   notification.UpdatedAt,
-		DeletedAt:   notification.DeletedAt,
+		ID:        updated.ID,
+		UserID:    updated.UserID,
+		Title:     updated.Title,
+		Type:      updated.Type,
+		Message:   updated.Message,
+		IsRead:    updated.IsRead,
+		ReadAt:    updated.ReadAt,
+		Metadata:  updated.Metadata,
+		User:      updated.User,
+		CreatedAt: updated.CreatedAt,
+		UpdatedAt: updated.UpdatedAt,
+		DeletedAt: updated.DeletedAt,
 	}, nil
 }
 
-func (service *NotificationService) DeleteNotifications(notificationRequest *models.NotificationIsHardDeleteRequest, ctx *fiber.Ctx, userInfo *models.User) error {
-	for _, notificationId := range notificationRequest.IDs {
-		_, err := service.NotificationRepository.FindById(notificationId.String(), false)
-		if err != nil {
+func (service *NotificationService) DeleteNotifications(req *models.NotificationIsHardDeleteRequest, ctx *fiber.Ctx, userInfo *models.User) error {
+	_ = ctx
+	_ = userInfo
+
+	for _, id := range req.IDs {
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			return tx.Error
+		}
+
+		if _, err := service.NotificationRepository.FindById(tx, id.String(), false); err != nil {
+			_ = tx.Rollback()
 			if err == repositories.ErrNotificationNotFound {
-				log.Printf("Notification not found: %v\n", notificationId)
+				log.Printf("Notification not found: %v\n", id)
 				continue
 			}
-			log.Printf("Error finding notification %v: %v\n", notificationId, err)
-			return errors.New("error finding usenotificationr")
+			log.Printf("Error finding notification %v: %v\n", id, err)
+			return errors.New("error finding notification")
 		}
 
-		if notificationRequest.IsHardDelete == "hardDelete" {
-			if err := service.NotificationRepository.Delete(notificationId.String(), true); err != nil {
-				log.Printf("Error hard deleting notification %v: %v\n", notificationId, err)
+		if err := service.NotificationRepository.Delete(tx, id.String(), req.IsHardDelete == "hardDelete"); err != nil {
+			_ = tx.Rollback()
+			log.Printf("Error deleting notification %v: %v\n", id, err)
+			if req.IsHardDelete == "hardDelete" {
 				return errors.New("error hard deleting notification")
 			}
-		} else {
-			if err := service.NotificationRepository.Delete(notificationId.String(), false); err != nil {
-				log.Printf("Error soft deleting notification %v: %v\n", notificationId, err)
-				return errors.New("error soft deleting notification")
-			}
+			return errors.New("error soft deleting notification")
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			return err
 		}
 	}
-
 	return nil
 }
 
-func (service *NotificationService) RestoreNotifications(notification *models.NotificationRestoreRequest, ctx *fiber.Ctx, userInfo *models.User) ([]models.Notification, error) {
-	var restoredNotifications []models.Notification
+func (service *NotificationService) RestoreNotifications(req *models.NotificationRestoreRequest, ctx *fiber.Ctx, userInfo *models.User) ([]models.Notification, error) {
+	_ = ctx
+	_ = userInfo
 
-	for _, notificationId := range notification.IDs {
-		notification := &models.Notification{ID: notificationId}
+	var restored []models.Notification
 
-		restoredNotification, err := service.NotificationRepository.Restore(notification, notificationId.String())
+	for _, id := range req.IDs {
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			return nil, tx.Error
+		}
+
+		res, err := service.NotificationRepository.Restore(tx, id.String())
 		if err != nil {
+			_ = tx.Rollback()
 			if err == repositories.ErrNotificationNotFound {
-				log.Printf("Notification not found: %v\n", notificationId)
+				log.Printf("Notification not found: %v\n", id)
 				continue
 			}
-			log.Printf("Error restoring notification %v: %v\n", notificationId, err)
+			log.Printf("Error restoring notification %v: %v\n", id, err)
 			return nil, errors.New("error restoring notification")
 		}
 
-		restoredNotifications = append(restoredNotifications, *restoredNotification)
-	}
+		if err := tx.Commit().Error; err != nil {
+			return nil, err
+		}
 
-	return restoredNotifications, nil
+		restored = append(restored, *res)
+	}
+	return restored, nil
 }

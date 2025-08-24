@@ -9,16 +9,25 @@ import (
 	"gorm.io/gorm"
 )
 
+// ==============================
+// Interface (transaction-aware)
+// ==============================
+
 type UserRepository interface {
-	FindAll() ([]models.User, error)
-	FindAllPaginated(req *models.PaginationRequest) ([]models.User, int64, error)
-	FindByEmailOrUsername(email string) (*models.User, error)
-	FindById(userId string, isSoftDelete bool) (*models.User, error)
-	Insert(user *models.User) (*models.User, error)
-	Update(user *models.User) (*models.User, error)
-	Delete(userId string, isHardDelete bool) error
-	Restore(user *models.User, userId string) (*models.User, error)
+	FindAll(tx *gorm.DB) ([]models.User, error)
+	FindAllPaginated(tx *gorm.DB, req *models.PaginationRequest) ([]models.User, int64, error)
+	FindByEmailOrUsername(tx *gorm.DB, identifier string) (*models.User, error)
+	FindById(tx *gorm.DB, userId string, includeTrashed bool) (*models.User, error)
+	FindByUsername(tx *gorm.DB, username string) (*models.User, error)
+	Insert(tx *gorm.DB, user *models.User) (*models.User, error)
+	Update(tx *gorm.DB, user *models.User) (*models.User, error)
+	Delete(tx *gorm.DB, userId string, isHardDelete bool) error
+	Restore(tx *gorm.DB, userID string) (*models.User, error)
 }
+
+// ==============================
+// Implementation
+// ==============================
 
 type UserRepositoryImpl struct {
 	DB *gorm.DB
@@ -28,10 +37,20 @@ func NewUserRepository(db *gorm.DB) *UserRepositoryImpl {
 	return &UserRepositoryImpl{DB: db}
 }
 
-func (r *UserRepositoryImpl) FindAll() ([]models.User, error) {
+func (r *UserRepositoryImpl) useDB(tx *gorm.DB) *gorm.DB {
+	if tx != nil {
+		return tx
+	}
+	return r.DB
+}
+
+// ---------- Reads ----------
+
+func (r *UserRepositoryImpl) FindAll(tx *gorm.DB) ([]models.User, error) {
 	var users []models.User
-	if err := r.DB.Unscoped().
-	 Preload("Avatar").
+	if err := r.useDB(tx).
+		Unscoped().
+		Preload("Avatar").
 		Preload("Role").
 		Find(&users).Error; err != nil {
 		return nil, HandleDatabaseError(err, "user")
@@ -39,11 +58,14 @@ func (r *UserRepositoryImpl) FindAll() ([]models.User, error) {
 	return users, nil
 }
 
-func (r *UserRepositoryImpl) FindAllPaginated(req *models.PaginationRequest) ([]models.User, int64, error) {
-	var users []models.User
-	var totalCount int64
+func (r *UserRepositoryImpl) FindAllPaginated(tx *gorm.DB, req *models.PaginationRequest) ([]models.User, int64, error) {
+	var (
+		users      []models.User
+		totalCount int64
+	)
 
-	query := r.DB.Unscoped().
+	query := r.useDB(tx).
+		Unscoped().
 		Preload("Avatar").
 		Preload("Role")
 
@@ -53,8 +75,9 @@ func (r *UserRepositoryImpl) FindAllPaginated(req *models.PaginationRequest) ([]
 	case "deleted":
 		query = query.Where("deleted_at IS NOT NULL")
 	case "all":
+		// no filter
 	default:
-		query = query.Where("deleted_at IS NULL") 
+		query = query.Where("deleted_at IS NULL")
 	}
 
 	if req.RoleID != "" {
@@ -83,127 +106,120 @@ func (r *UserRepositoryImpl) FindAllPaginated(req *models.PaginationRequest) ([]
 	return users, totalCount, nil
 }
 
+func (r *UserRepositoryImpl) FindByEmailOrUsername(tx *gorm.DB, identifier string) (*models.User, error) {
+	var user models.User
+	db := r.useDB(tx)
 
-func (r *UserRepositoryImpl) FindByEmailOrUsername(identifier string) (*models.User, error) {
-	var user *models.User
-
-	err := r.DB.
+	err := db.
 		Preload("Avatar").
 		Preload("Role").
 		Where("email = ?", identifier).
 		First(&user).Error
 
 	if err == nil {
-		return user, nil
+		return &user, nil
 	}
-
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, HandleDatabaseError(err, "user")
 	}
 
-	err = r.DB.
+	if err := db.
 		Preload("Avatar").
 		Preload("Role").
 		Where("username = ?", identifier).
-		First(&user).Error
-
-	if err != nil {
+		First(&user).Error; err != nil {
 		return nil, HandleDatabaseError(err, "user")
 	}
 
-	return user, nil
+	return &user, nil
 }
 
-func (r *UserRepositoryImpl) FindById(userId string, isSoftDelete bool) (*models.User, error) {
-	var user *models.User
-	db := r.DB
-
-	if !isSoftDelete {
+func (r *UserRepositoryImpl) FindById(tx *gorm.DB, userId string, includeTrashed bool) (*models.User, error) {
+	var user models.User
+	db := r.useDB(tx)
+	if includeTrashed {
 		db = db.Unscoped()
 	}
 
-	err := db.
-	 Preload("Avatar").
+	if err := db.
+		Preload("Avatar").
 		Preload("Role").
-		First(&user, "id = ?", userId).Error
-
-	if err != nil {
+		First(&user, "id = ?", userId).Error; err != nil {
 		return nil, HandleDatabaseError(err, "user")
 	}
-
-	return user, nil
+	return &user, nil
 }
 
-func (r *UserRepositoryImpl) FindByUsername(username string) (*models.User, error) {
-	var user *models.User
-	err := r.DB.
-	 Preload("Avatar").
+func (r *UserRepositoryImpl) FindByUsername(tx *gorm.DB, username string) (*models.User, error) {
+	var user models.User
+	if err := r.useDB(tx).
+		Preload("Avatar").
 		Preload("Role").
 		Where("username = ?", username).
-		First(&user).Error
-
-	if err != nil {
+		First(&user).Error; err != nil {
 		return nil, HandleDatabaseError(err, "user")
 	}
-
-	return user, nil
+	return &user, nil
 }
 
+// ---------- Mutations ----------
 
-func (r *UserRepositoryImpl) Insert(user *models.User) (*models.User, error) {
-
+func (r *UserRepositoryImpl) Insert(tx *gorm.DB, user *models.User) (*models.User, error) {
 	if user.ID == uuid.Nil {
 		return nil, fmt.Errorf("user ID cannot be empty")
 	}
-
-	if err := r.DB.Create(&user).Error; err != nil {
+	if err := r.useDB(tx).Create(user).Error; err != nil {
 		return nil, HandleDatabaseError(err, "user")
 	}
 	return user, nil
 }
 
-func (r *UserRepositoryImpl) Update(user *models.User) (*models.User, error) {
-
+func (r *UserRepositoryImpl) Update(tx *gorm.DB, user *models.User) (*models.User, error) {
 	if user.ID == uuid.Nil {
 		return nil, fmt.Errorf("user ID cannot be empty")
 	}
-
-	if err := r.DB.Save(&user).Error; err != nil {
+	if err := r.useDB(tx).Save(user).Error; err != nil {
 		return nil, HandleDatabaseError(err, "user")
 	}
 	return user, nil
 }
 
-func (r *UserRepositoryImpl) Delete(userId string, isHardDelete bool) error {
-	var user *models.User
+func (r *UserRepositoryImpl) Delete(tx *gorm.DB, userId string, isHardDelete bool) error {
+	db := r.useDB(tx)
 
-	if err := r.DB.Unscoped().First(&user, "id = ?", userId).Error; err != nil {
+	var user models.User
+	if err := db.Unscoped().First(&user, "id = ?", userId).Error; err != nil {
 		return HandleDatabaseError(err, "user")
 	}
 
 	if isHardDelete {
-		if err := r.DB.Unscoped().Delete(&user).Error; err != nil {
+		if err := db.Unscoped().Delete(&user).Error; err != nil {
 			return HandleDatabaseError(err, "user")
 		}
 	} else {
-		if err := r.DB.Delete(&user).Error; err != nil {
+		if err := db.Delete(&user).Error; err != nil {
 			return HandleDatabaseError(err, "user")
 		}
 	}
 	return nil
 }
 
-func (r *UserRepositoryImpl) Restore(user *models.User, userID string) (*models.User, error) {
-	if err := r.DB.Unscoped().Model(user).Where("id = ?", userID).Update("deleted_at", nil).Error; err != nil {
-		return nil, err
+func (r *UserRepositoryImpl) Restore(tx *gorm.DB, userID string) (*models.User, error) {
+	db := r.useDB(tx)
+
+	if err := db.Unscoped().
+		Model(&models.User{}).
+		Where("id = ?", userID).
+		Update("deleted_at", nil).Error; err != nil {
+		return nil, HandleDatabaseError(err, "user")
 	}
 
-	var restoredUser *models.User
-	if err := r.DB.Unscoped().First(&restoredUser, "id = ?", userID).Error; err != nil {
-		return nil, err
+	var restored models.User
+	if err := db.
+		Preload("Avatar").
+		Preload("Role").
+		First(&restored, "id = ?", userID).Error; err != nil {
+		return nil, HandleDatabaseError(err, "user")
 	}
-	
-	return restoredUser, nil
+	return &restored, nil
 }
-
-

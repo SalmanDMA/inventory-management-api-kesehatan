@@ -11,6 +11,7 @@ import (
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type PurchaseOrderService struct {
@@ -18,6 +19,7 @@ type PurchaseOrderService struct {
 	SupplierRepository      repositories.SupplierRepository
 	ItemRepository          repositories.ItemRepository
 	PaymentRepository       repositories.PaymentRepository
+	ItemHistoryRepository   repositories.ItemHistoryRepository
 }
 
 func NewPurchaseOrderService(
@@ -25,17 +27,19 @@ func NewPurchaseOrderService(
 	supplierRepo repositories.SupplierRepository,
 	itemRepo repositories.ItemRepository,
 	paymentRepo repositories.PaymentRepository,
+	itemHistoryRepo repositories.ItemHistoryRepository,
 ) *PurchaseOrderService {
 	return &PurchaseOrderService{
 		PurchaseOrderRepository: poRepo,
 		SupplierRepository:      supplierRepo,
 		ItemRepository:          itemRepo,
 		PaymentRepository:       paymentRepo,
+		ItemHistoryRepository:   itemHistoryRepo,
 	}
 }
 
 func (service *PurchaseOrderService) GetAllPurchaseOrders() ([]models.ResponseGetPurchaseOrder, error) {
-	pos, err := service.PurchaseOrderRepository.FindAll()
+	pos, err := service.PurchaseOrderRepository.FindAll(nil)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +66,7 @@ func (service *PurchaseOrderService) GetAllPurchaseOrdersPaginated(req *models.P
 		req.Status = "active"
 	}
 
-	pos, totalCount, err := service.PurchaseOrderRepository.FindAllPaginated(req)
+	pos, totalCount, err := service.PurchaseOrderRepository.FindAllPaginated(nil, req)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +96,7 @@ func (service *PurchaseOrderService) GetAllPurchaseOrdersPaginated(req *models.P
 }
 
 func (service *PurchaseOrderService) GetPurchaseOrderByID(poId string) (*models.ResponseGetPurchaseOrder, error) {
-	po, err := service.PurchaseOrderRepository.FindById(poId, false)
+	po, err := service.PurchaseOrderRepository.FindById(nil, poId, false)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +106,7 @@ func (service *PurchaseOrderService) GetPurchaseOrderByID(poId string) (*models.
 }
 
 func (service *PurchaseOrderService) GenerateDocumentPurchaseOrder(poId string) (string, []byte, error) {
-	po, err := service.PurchaseOrderRepository.FindById(poId, true)
+	po, err := service.PurchaseOrderRepository.FindById(nil, poId, true)
 	if err != nil {
 		return "", nil, fmt.Errorf("purchase order not found: %w", err)
 	}
@@ -119,17 +123,34 @@ func (service *PurchaseOrderService) CreatePurchaseOrder(
 	poRequest *models.PurchaseOrderCreateRequest,
 	userInfo *models.User,
 ) (*models.PurchaseOrder, error) {
-	if _, err := service.SupplierRepository.FindById(poRequest.SupplierID.String(), false); err != nil {
+
+	tx := configs.DB.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// validate supplier (dalam tx)
+	if _, err := service.SupplierRepository.FindById(tx, poRequest.SupplierID.String(), false); err != nil {
+		tx.Rollback()
 		return nil, errors.New("supplier not found")
 	}
 
+	// build items + hitung total dalam tx (ambil UoM dari item repo)
 	var totalAmount int
 	poItems := make([]models.PurchaseOrderItem, 0, len(poRequest.Items))
 
 	for _, itemReq := range poRequest.Items {
-		if _, err := service.ItemRepository.FindById(itemReq.ItemID.String(), false); err != nil {
+		itemData, err := service.ItemRepository.FindById(tx, itemReq.ItemID.String(), false)
+		if err != nil {
+			tx.Rollback()
 			return nil, fmt.Errorf("item %s not found", itemReq.ItemID.String())
 		}
+
 		totalPrice := itemReq.Quantity * itemReq.UnitPrice
 		totalAmount += totalPrice
 
@@ -137,14 +158,16 @@ func (service *PurchaseOrderService) CreatePurchaseOrder(
 			ID:         uuid.New(),
 			ItemID:     itemReq.ItemID,
 			Quantity:   itemReq.Quantity,
+			UoMID:      itemData.UoMID,
 			UnitPrice:  itemReq.UnitPrice,
 			TotalPrice: totalPrice,
 			Status:     "Ordered",
 		})
 	}
 
-	poNumber, err := service.PurchaseOrderRepository.GenerateNextPONumber()
+	poNumber, err := service.PurchaseOrderRepository.GenerateNextPONumber(tx)
 	if err != nil {
+		tx.Rollback()
 		return nil, fmt.Errorf("error generating PO number: %w", err)
 	}
 
@@ -166,20 +189,11 @@ func (service *PurchaseOrderService) CreatePurchaseOrder(
 		DPAmount:           poRequest.DPAmount,
 		DueDate:            poRequest.DueDate,
 		Notes:              poRequest.Notes,
+		Tax:                poRequest.Tax,
 		PurchaseOrderItems: poItems,
 	}
 
-	tx := configs.DB.Begin()
-	if tx.Error != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
-	}
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
-
-	if err := tx.Create(newPO).Error; err != nil {
+	if _, err := service.PurchaseOrderRepository.Insert(tx, newPO); err != nil {
 		tx.Rollback()
 		return nil, fmt.Errorf("error creating purchase order: %w", err)
 	}
@@ -194,12 +208,14 @@ func (service *PurchaseOrderService) CreatePurchaseOrder(
 			PaymentMethod:   "Pending",
 			Notes:           "Initial DP payment",
 		}
-		if err := tx.Create(dpPayment).Error; err != nil {
+		if _, err := service.PaymentRepository.Insert(tx, dpPayment); err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf("error creating DP payment: %w", err)
 		}
 
-	if err := tx.Model(newPO).Update("paid_amount", poRequest.DPAmount).Error; err != nil {
+		// update paid_amount via repo update
+		newPO.PaidAmount = poRequest.DPAmount
+		if _, err := service.PurchaseOrderRepository.Update(tx, newPO); err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf("error updating PO paid amount: %w", err)
 		}
@@ -209,7 +225,7 @@ func (service *PurchaseOrderService) CreatePurchaseOrder(
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	createdPO, err := service.PurchaseOrderRepository.FindById(newPO.ID.String(), false)
+	createdPO, err := service.PurchaseOrderRepository.FindById(nil, newPO.ID.String(), false)
 	if err != nil {
 		log.Printf("Warning: PO created but failed to fetch created data: %v", err)
 		return newPO, nil
@@ -222,13 +238,6 @@ func (service *PurchaseOrderService) UpdatePurchaseOrder(
 	poRequest *models.PurchaseOrderUpdateRequest,
 	userInfo *models.User,
 ) (*models.PurchaseOrder, error) {
-	po, err := service.PurchaseOrderRepository.FindById(poId, false)
-	if err != nil {
-		return nil, err
-	}
-	if po.POStatus != "Draft" {
-		return nil, errors.New("can only update purchase orders in Draft status")
-	}
 
 	tx := configs.DB.Begin()
 	if tx.Error != nil {
@@ -240,10 +249,20 @@ func (service *PurchaseOrderService) UpdatePurchaseOrder(
 		}
 	}()
 
+	po, err := service.PurchaseOrderRepository.FindById(tx, poId, false)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if po.POStatus != "Draft" {
+		tx.Rollback()
+		return nil, errors.New("can only update purchase orders in Draft status")
+	}
+
 	updates := map[string]interface{}{}
 
 	if poRequest.SupplierID != uuid.Nil && poRequest.SupplierID != po.SupplierID {
-		if _, err := service.SupplierRepository.FindById(poRequest.SupplierID.String(), false); err != nil {
+		if _, err := service.SupplierRepository.FindById(tx, poRequest.SupplierID.String(), false); err != nil {
 			tx.Rollback()
 			return nil, errors.New("supplier not found")
 		}
@@ -259,7 +278,6 @@ func (service *PurchaseOrderService) UpdatePurchaseOrder(
 	if poRequest.TermOfPayment != "" {
 		updates["term_of_payment"] = poRequest.TermOfPayment
 	}
-
 	if poRequest.DPAmount >= 0 {
 		updates["dp_amount"] = poRequest.DPAmount
 	}
@@ -269,8 +287,10 @@ func (service *PurchaseOrderService) UpdatePurchaseOrder(
 	if poRequest.Notes != "" {
 		updates["notes"] = poRequest.Notes
 	}
+	updates["tax"] = poRequest.Tax
 
 	if len(poRequest.Items) > 0 {
+		// ambil existing items dulu
 		var existingItems []models.PurchaseOrderItem
 		if err := tx.Where("purchase_order_id = ?", po.ID).Find(&existingItems).Error; err != nil {
 			tx.Rollback()
@@ -284,29 +304,44 @@ func (service *PurchaseOrderService) UpdatePurchaseOrder(
 
 		finalItems := make([]models.PurchaseOrderItem, 0, len(poRequest.Items))
 		seen := make(map[uuid.UUID]bool)
+
 		for _, req := range poRequest.Items {
-			if _, err := service.ItemRepository.FindById(req.ItemID.String(), false); err != nil {
+			itemData, err := service.ItemRepository.FindById(tx, req.ItemID.String(), false)
+			if err != nil {
 				tx.Rollback()
 				return nil, fmt.Errorf("item %s not found", req.ItemID.String())
 			}
 
 			if ex, ok := existingByItemID[req.ItemID]; ok {
-				changed := (ex.Quantity != req.Quantity) || (ex.UnitPrice != req.UnitPrice)
-				ex.Quantity = req.Quantity
-				ex.UnitPrice = req.UnitPrice
-				ex.TotalPrice = req.Quantity * req.UnitPrice
+				newQty := req.Quantity
+				newPrice := req.UnitPrice
+				newUoMID := itemData.UoMID
+				newTotal := newQty * newPrice
+
+				changed := (ex.Quantity != newQty) ||
+					(ex.UnitPrice != newPrice) ||
+					(ex.UoMID != newUoMID) ||
+					(ex.TotalPrice != newTotal)
+
+				ex.Quantity = newQty
+				ex.UnitPrice = newPrice
+				ex.UoMID = newUoMID
+				ex.TotalPrice = newTotal
+
 				if changed {
 					if err := tx.Model(&models.PurchaseOrderItem{}).
 						Where("id = ?", ex.ID).
 						Updates(map[string]interface{}{
 							"quantity":    ex.Quantity,
 							"unit_price":  ex.UnitPrice,
+							"uom_id":      ex.UoMID,
 							"total_price": ex.TotalPrice,
 						}).Error; err != nil {
 						tx.Rollback()
 						return nil, fmt.Errorf("error updating item %s: %w", ex.ID, err)
 					}
 				}
+
 				finalItems = append(finalItems, *ex)
 				seen[req.ItemID] = true
 			} else {
@@ -315,6 +350,7 @@ func (service *PurchaseOrderService) UpdatePurchaseOrder(
 					PurchaseOrderID: po.ID,
 					ItemID:          req.ItemID,
 					Quantity:        req.Quantity,
+					UoMID:           itemData.UoMID,
 					UnitPrice:       req.UnitPrice,
 					TotalPrice:      req.Quantity * req.UnitPrice,
 					Status:          "Ordered",
@@ -328,9 +364,10 @@ func (service *PurchaseOrderService) UpdatePurchaseOrder(
 			}
 		}
 
+		// hapus yang tidak ada lagi
 		for _, ex := range existingItems {
 			if !seen[ex.ItemID] {
-				if err := tx.Delete(&models.PurchaseOrderItem{}, "id = ?", ex.ID).Error; err != nil {
+				if err := tx.Unscoped().Delete(&models.PurchaseOrderItem{}, "id = ?", ex.ID).Error; err != nil {
 					tx.Rollback()
 					return nil, fmt.Errorf("error deleting removed item: %w", err)
 				}
@@ -344,6 +381,7 @@ func (service *PurchaseOrderService) UpdatePurchaseOrder(
 		updates["total_amount"] = total
 	}
 
+	// lakukan update ke PO kalau ada perubahan
 	if len(updates) > 0 {
 		if err := tx.Model(&models.PurchaseOrder{}).
 			Where("id = ?", po.ID).
@@ -357,7 +395,7 @@ func (service *PurchaseOrderService) UpdatePurchaseOrder(
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	updatedPO, err := service.PurchaseOrderRepository.FindById(po.ID.String(), false)
+	updatedPO, err := service.PurchaseOrderRepository.FindById(nil, po.ID.String(), false)
 	if err != nil {
 		log.Printf("Warning: PO updated but failed to fetch updated data: %v", err)
 		return po, nil
@@ -366,7 +404,7 @@ func (service *PurchaseOrderService) UpdatePurchaseOrder(
 }
 
 func (service *PurchaseOrderService) UpdatePurchaseOrderStatus(poId string, statusRequest *models.PurchaseOrderStatusUpdateRequest, userInfo *models.User) error {
-	po, err := service.PurchaseOrderRepository.FindById(poId, false)
+	po, err := service.PurchaseOrderRepository.FindById(nil, poId, false)
 	if err != nil {
 		return err
 	}
@@ -376,19 +414,10 @@ func (service *PurchaseOrderService) UpdatePurchaseOrderStatus(poId string, stat
 		return err
 	}
 
-	return service.PurchaseOrderRepository.UpdateStatus(poId, statusRequest.POStatus, statusRequest.PaymentStatus)
+	return service.PurchaseOrderRepository.UpdateStatus(nil, poId, statusRequest.POStatus, statusRequest.PaymentStatus)
 }
 
 func (service *PurchaseOrderService) ReceiveItems(poId string, receiveRequest *models.ReceiveItemsRequest, userInfo *models.User) error {
-	po, err := service.PurchaseOrderRepository.FindById(poId, false)
-	if err != nil {
-		return err
-	}
-
-	if po.POStatus != "Ordered" {
-		return errors.New("can only receive items for purchase orders in 'Ordered' status")
-	}
-
 	tx := configs.DB.Begin()
 	if tx.Error != nil {
 		return fmt.Errorf("failed to begin transaction: %w", tx.Error)
@@ -399,8 +428,19 @@ func (service *PurchaseOrderService) ReceiveItems(poId string, receiveRequest *m
 		}
 	}()
 
-	allItemsFullyProcessed := true 
-	allItemsFullyReturned := true
+	po, err := service.PurchaseOrderRepository.FindById(tx, poId, false)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	if po.POStatus != "Ordered" {
+		tx.Rollback()
+		return errors.New("can only receive items for purchase orders in 'Ordered' status")
+	}
+
+	allReceived := true
+	allReturned := true
+	allOrdered := true
 
 	for _, req := range receiveRequest.Items {
 		var poItem models.PurchaseOrderItem
@@ -409,6 +449,10 @@ func (service *PurchaseOrderService) ReceiveItems(poId string, receiveRequest *m
 			return fmt.Errorf("purchase order item not found: %w", err)
 		}
 
+		oldRecv := poItem.ReceivedQuantity
+		oldRet := poItem.ReturnedQuantity
+		qty := poItem.Quantity
+
 		deltaRecv := req.ReceivedQuantity
 		deltaRet := req.ReturnedQuantity
 		if deltaRecv < 0 || deltaRet < 0 {
@@ -416,38 +460,49 @@ func (service *PurchaseOrderService) ReceiveItems(poId string, receiveRequest *m
 			return errors.New("quantities must be non-negative")
 		}
 
-		newRecv := poItem.ReceivedQuantity + deltaRecv
-		newRet := poItem.ReturnedQuantity + deltaRet
+		newRecv := oldRecv + deltaRecv
+		newRet := oldRet + deltaRet
 		totalProcessed := newRecv + newRet
 
-		if totalProcessed > poItem.Quantity {
+		if totalProcessed > qty {
 			tx.Rollback()
 			return errors.New("received + returned quantity cannot exceed ordered quantity")
 		}
 
-		poItem.ReceivedQuantity = newRecv
-		poItem.ReturnedQuantity = newRet
+		oldStatus := "Partial"
+		switch {
+		case oldRecv+oldRet == 0:
+			oldStatus = "Ordered"
+		case oldRet == qty:
+			oldStatus = "Returned"
+		case oldRecv == qty && oldRet == 0:
+			oldStatus = "Received"
+		}
 
+		newStatus := "Partial"
 		switch {
 		case totalProcessed == 0:
-			poItem.Status = "Ordered"
-		case totalProcessed < poItem.Quantity:
-			poItem.Status = "Partial"
+			newStatus = "Ordered"
+		case newRet == qty:
+			newStatus = "Returned"
+		case newRecv == qty && newRet == 0:
+			newStatus = "Received"
 		default:
-			if newRet == poItem.Quantity {
-				poItem.Status = "Returned"
-			} else if newRecv == poItem.Quantity {
-				poItem.Status = "Received"
-			} else {
-				poItem.Status = "Completed"
-			}
+			newStatus = "Partial"
 		}
 
-		if totalProcessed < poItem.Quantity {
-			allItemsFullyProcessed = false
+		poItem.ReceivedQuantity = newRecv
+		poItem.ReturnedQuantity = newRet
+		poItem.Status = newStatus
+
+		if newStatus != "Received" {
+			allReceived = false
 		}
-		if !(totalProcessed == poItem.Quantity && newRet == poItem.Quantity) {
-			allItemsFullyReturned = false
+		if newStatus != "Returned" {
+			allReturned = false
+		}
+		if newStatus != "Ordered" {
+			allOrdered = false
 		}
 
 		if err := tx.Save(&poItem).Error; err != nil {
@@ -455,72 +510,67 @@ func (service *PurchaseOrderService) ReceiveItems(poId string, receiveRequest *m
 			return fmt.Errorf("error updating purchase order item: %w", err)
 		}
 
-		if deltaRecv > 0 {
-			var item models.Item
-			if err := tx.First(&item, "id = ?", poItem.ItemID).Error; err != nil {
-							tx.Rollback()
-							return fmt.Errorf("item not found: %w", err)
-			}
-
-			item.Stock += deltaRecv
-			if err := tx.Save(&item).Error; err != nil {
-							tx.Rollback()
-							return fmt.Errorf("error updating item stock: %w", err)
-			}
-
-			var lastStockHist models.ItemHistory
-			err := tx.
-							Where("item_id = ? AND change_type IN ?",
-											poItem.ItemID,
-											[]string{"create_stock", "update_stock"},
-							).
-							Order("created_at DESC").
-							Limit(1).
-							Find(&lastStockHist).Error
+		// Bila item BARU menjadi "Received", baru tambahkan stock + catat history
+		if oldStatus != "Received" && newStatus == "Received" {
+			item, err := service.ItemRepository.FindById(tx, poItem.ItemID.String(), false)
 			if err != nil {
-							tx.Rollback()
-							return fmt.Errorf("error querying last stock history: %w", err)
+				tx.Rollback()
+				return fmt.Errorf("item not found: %w", err)
+			}
+
+			toAdd := newRecv
+			item.Stock += toAdd
+			if _, err := service.ItemRepository.Update(tx, item); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("error updating item stock: %w", err)
+			}
+
+			// cek last stock history via repo (tx-aware)
+			lastHist, err := service.ItemHistoryRepository.FindLastByItem(tx, poItem.ItemID, "stock")
+			if err != nil {
+				tx.Rollback()
+				return fmt.Errorf("error querying last stock history: %w", err)
 			}
 
 			changeType := "update_stock"
-			oldStock := lastStockHist.CurrentStock
-			if lastStockHist.ID == uuid.Nil {
-							changeType = "create_stock"
-							oldStock = 0
+			oldStock := 0
+			if lastHist != nil {
+				oldStock = lastHist.CurrentStock
+			} else {
+				changeType = "create_stock"
 			}
 
 			newHist := models.ItemHistory{
-							ID:           uuid.New(),
-							ItemID:       poItem.ItemID,
-							ChangeType:   changeType,               
-							OldStock:     oldStock,
-							NewStock:     item.Stock,
-							CurrentStock: item.Stock,
-							Description:  fmt.Sprintf("Received %d units (%s)", deltaRecv, po.PONumber),
-							CreatedBy:    &userInfo.ID,
-							UpdatedBy:    &userInfo.ID,
+				ID:           uuid.New(),
+				ItemID:       poItem.ItemID,
+				ChangeType:   changeType,
+				OldStock:     oldStock,
+				NewStock:     item.Stock,
+				CurrentStock: item.Stock,
+				Description:  fmt.Sprintf("PO fully received: +%d units (%s)", toAdd, po.PONumber),
+				CreatedBy:    &userInfo.ID,
+				UpdatedBy:    &userInfo.ID,
 			}
-
-			if err := tx.Create(&newHist).Error; err != nil {
-							tx.Rollback()
-							return fmt.Errorf("error creating item history: %w", err)
+			if _, err := service.ItemHistoryRepository.Insert(tx, &newHist); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("error creating item history: %w", err)
 			}
 		}
 	}
 
-	newPOStatus := po.POStatus
+	newPOStatus := "Partial"
 	switch {
-	case allItemsFullyProcessed && allItemsFullyReturned:
-		newPOStatus = "Returned"
-	case allItemsFullyProcessed && !allItemsFullyReturned:
+	case allReceived:
 		newPOStatus = "Received"
-	default:
+	case allReturned:
+		newPOStatus = "Returned"
+	case allOrdered:
 		newPOStatus = "Ordered"
+	default:
+		newPOStatus = "Partial"
 	}
 
-	if err := tx.Model(&models.PurchaseOrder{}).
-		Where("id = ?", poId).
-		Update("po_status", newPOStatus).Error; err != nil {
+	if err := service.PurchaseOrderRepository.UpdateStatus(tx, poId, newPOStatus, ""); err != nil {
 		tx.Rollback()
 		return fmt.Errorf("error updating purchase order status: %w", err)
 	}
@@ -531,36 +581,109 @@ func (service *PurchaseOrderService) ReceiveItems(poId string, receiveRequest *m
 	return nil
 }
 
-func (service *PurchaseOrderService) DeletePurchaseOrders(req *models.PurchaseOrderIsHardDeleteRequest, userInfo *models.User) error {
-	isHardDelete := req.IsHardDelete == "hardDelete"
-
-	for _, id := range req.IDs {
-		po, err := service.PurchaseOrderRepository.FindById(id.String(), true)
-		if err != nil {
-			return fmt.Errorf("purchase order %s not found: %w", id.String(), err)
+func (service *PurchaseOrderService) DeletePurchaseOrders(
+	req *models.PurchaseOrderIsHardDeleteRequest,
+	userInfo *models.User,
+) error {
+	for _, poId := range req.IDs {
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			log.Printf("Failed to begin transaction for PO delete %v: %v\n", poId, tx.Error)
+			return errors.New("error beginning transaction")
 		}
 
-		if po.POStatus != "Draft" && !isHardDelete {
-			return fmt.Errorf("can only soft delete purchase orders in Draft status")
+		if _, err := service.PurchaseOrderRepository.FindById(tx, poId.String(), true); err != nil {
+			tx.Rollback()
+			if err == repositories.ErrPurchaseOrderNotFound || errors.Is(err, gorm.ErrRecordNotFound) {
+				log.Printf("Purchase order not found: %v\n", poId)
+				continue
+			}
+			log.Printf("Error finding purchase order %v: %v\n", poId, err)
+			return errors.New("error finding purchase order")
 		}
 
-		if err := service.PurchaseOrderRepository.Delete(id.String(), isHardDelete); err != nil {
-			return fmt.Errorf("error deleting purchase order %s: %w", id.String(), err)
+		if req.IsHardDelete == "hardDelete" {
+			if err := tx.Unscoped().Delete(&models.PurchaseOrderItem{}, "purchase_order_id = ?", poId).Error; err != nil {
+				tx.Rollback()
+				log.Printf("Error hard deleting purchase order items %v: %v\n", poId, err)
+				return errors.New("error hard deleting purchase order items")
+			}
+			if err := tx.Unscoped().Delete(&models.Payment{}, "purchase_order_id = ?", poId).Error; err != nil {
+				tx.Rollback()
+				log.Printf("Error hard deleting payments for purchase order %v: %v\n", poId, err)
+				return errors.New("error hard deleting payments for purchase order")
+			}
+			if err := service.PurchaseOrderRepository.Delete(tx, poId.String(), true); err != nil {
+				tx.Rollback()
+				log.Printf("Error hard deleting purchase order %v: %v\n", poId, err)
+				return errors.New("error hard deleting purchase order")
+			}
+		} else {
+			if err := service.PurchaseOrderRepository.Delete(tx, poId.String(), false); err != nil {
+				tx.Rollback()
+				log.Printf("Error soft deleting purchase order %v: %v\n", poId, err)
+				return errors.New("error soft deleting purchase order")
+			}
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			log.Printf("Failed to commit transaction for purchase order delete %v: %v\n", poId, err)
+			return errors.New("error committing transaction")
 		}
 	}
 
 	return nil
 }
 
-func (service *PurchaseOrderService) RestorePurchaseOrders(req *models.PurchaseOrderRestoreRequest, userInfo *models.User) error {
-	for _, id := range req.IDs {
-		po := &models.PurchaseOrder{}
-		if _, err := service.PurchaseOrderRepository.Restore(po, id.String()); err != nil {
-			return fmt.Errorf("error restoring purchase order %s: %w", id.String(), err)
+func (service *PurchaseOrderService) RestorePurchaseOrders(
+	req *models.PurchaseOrderRestoreRequest,
+	userInfo *models.User,
+) ([]models.PurchaseOrder, error) {
+	var restoredPOs []models.PurchaseOrder
+
+	for _, poId := range req.IDs {
+		tx := configs.DB.Begin()
+		if tx.Error != nil {
+			log.Printf("Failed to begin transaction for user restore %v: %v\n", poId, tx.Error)
+			return nil, errors.New("error beginning transaction")
 		}
+
+		if _, err := service.PurchaseOrderRepository.FindById(tx, poId.String(), true); err != nil {
+			tx.Rollback()
+			if err == repositories.ErrPurchaseOrderNotFound || errors.Is(err, gorm.ErrRecordNotFound) {
+				log.Printf("Purchase order not found for restore: %v\n", poId)
+				continue
+			}
+			log.Printf("Error finding purchase order %v: %v\n", poId, err)
+			return nil, errors.New("error finding purchase order")
+		}
+
+		_, err := service.PurchaseOrderRepository.Restore(tx, poId.String())
+		if err != nil {
+			tx.Rollback()
+			if err == repositories.ErrPurchaseOrderNotFound || errors.Is(err, gorm.ErrRecordNotFound) {
+				log.Printf("Purchase order not found for restore: %v\n", poId)
+				continue
+			}
+			log.Printf("Error restoring purchase order %v: %v\n", poId, err)
+			return nil, errors.New("error restoring purchase order")
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			log.Printf("Failed to commit transaction for purchase order restore %v: %v\n", poId, err)
+			return nil, errors.New("error committing transaction")
+		}
+
+		restoredPO, err := service.PurchaseOrderRepository.FindById(nil, poId.String(), false)
+		if err != nil {
+			log.Printf("Warning: PO restored but failed to fetch restored data: %v", err)
+			continue
+		}
+
+		restoredPOs = append(restoredPOs, *restoredPO)
 	}
 
-	return nil
+	return restoredPOs, nil
 }
 
 // Helper functions
@@ -579,6 +702,7 @@ func (service *PurchaseOrderService) mapPOToResponse(po models.PurchaseOrder) mo
 		DPAmount:           po.DPAmount,
 		DueDate:            po.DueDate,
 		Notes:              po.Notes,
+		Tax: 															po.Tax,
 		CreatedAt:          po.CreatedAt,
 		UpdatedAt:          po.UpdatedAt,
 		DeletedAt:          po.DeletedAt,
@@ -593,6 +717,7 @@ func (service *PurchaseOrderService) validateStatusTransition(currentStatus, new
 		"Draft":    {"Ordered"},
 		"Ordered":  {"Received", "Returned", "Closed"},
 		"Received": {"Closed", "Returned"},
+		"Partial":  {"Received", "Returned"},
 		"Returned": {"Closed"},
 		"Closed":   {},
 	}
@@ -610,4 +735,3 @@ func (service *PurchaseOrderService) validateStatusTransition(currentStatus, new
 
 	return fmt.Errorf("invalid status transition from %s to %s", currentStatus, newStatus)
 }
-

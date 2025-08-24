@@ -8,17 +8,25 @@ import (
 	"gorm.io/gorm"
 )
 
+// ==============================
+// Interface (transaction-aware)
+// ==============================
+
 type NotificationRepository interface {
-	FindAll() ([]models.Notification, error)
-	FindById(notificationId string, isSoftDelete bool) (*models.Notification, error)
-	FindByUserID(userID uuid.UUID) ([]models.Notification, error)
-	FindUnreadByUserID(userID uuid.UUID) ([]models.Notification, error)
-	Update(notification *models.Notification) (*models.Notification, error)
-	Delete(notificationId string, isHardDelete bool) error
-	Restore(notification *models.Notification, notificationId string) (*models.Notification, error)
+	FindAll(tx *gorm.DB) ([]models.Notification, error)
+	FindById(tx *gorm.DB, notificationId string, includeTrashed bool) (*models.Notification, error)
+	FindByUserID(tx *gorm.DB, userID uuid.UUID) ([]models.Notification, error)
+	FindUnreadByUserID(tx *gorm.DB, userID uuid.UUID) ([]models.Notification, error)
+	Update(tx *gorm.DB, notification *models.Notification) (*models.Notification, error)
+	Delete(tx *gorm.DB, notificationId string, isHardDelete bool) error
+	Restore(tx *gorm.DB, notificationId string) (*models.Notification, error)
 }
 
-type NotificationRepositoryImpl struct{
+// ==============================
+// Implementation
+// ==============================
+
+type NotificationRepositoryImpl struct {
 	DB *gorm.DB
 }
 
@@ -26,37 +34,44 @@ func NewNotificationRepository(db *gorm.DB) *NotificationRepositoryImpl {
 	return &NotificationRepositoryImpl{DB: db}
 }
 
-func (r *NotificationRepositoryImpl) FindAll() ([]models.Notification, error) {
+func (r *NotificationRepositoryImpl) useDB(tx *gorm.DB) *gorm.DB {
+	if tx != nil {
+		return tx
+	}
+	return r.DB
+}
+
+// ---------- Reads ----------
+
+func (r *NotificationRepositoryImpl) FindAll(tx *gorm.DB) ([]models.Notification, error) {
 	var notifications []models.Notification
-	if err := r.DB.
-	 Unscoped().
-	 Preload("User").
-	 Find(&notifications).Error; err != nil {
+	if err := r.useDB(tx).
+		Unscoped().
+		Preload("User").
+		Find(&notifications).Error; err != nil {
 		return nil, HandleDatabaseError(err, "notification")
 	}
 	return notifications, nil
 }
 
-func (r *NotificationRepositoryImpl) FindById(notificationId string, isSoftDelete bool) (*models.Notification, error) {
-	var notification *models.Notification
-	db := r.DB
-
-	if !isSoftDelete {
+func (r *NotificationRepositoryImpl) FindById(tx *gorm.DB, notificationId string, includeTrashed bool) (*models.Notification, error) {
+	var n models.Notification
+	db := r.useDB(tx)
+	if includeTrashed {
 		db = db.Unscoped()
 	}
 
 	if err := db.
-		Preload("User").	
-		First(&notification, "id = ?", notificationId).Error; err != nil {
+		Preload("User").
+		First(&n, "id = ?", notificationId).Error; err != nil {
 		return nil, HandleDatabaseError(err, "notification")
 	}
-	
-	return notification, nil
+	return &n, nil
 }
 
-func (r *NotificationRepositoryImpl) FindByUserID(userID uuid.UUID) ([]models.Notification, error) {
+func (r *NotificationRepositoryImpl) FindByUserID(tx *gorm.DB, userID uuid.UUID) ([]models.Notification, error) {
 	var notifications []models.Notification
-	if err := r.DB.
+	if err := r.useDB(tx).
 		Preload("User").
 		Where("user_id = ?", userID).
 		Find(&notifications).Error; err != nil {
@@ -65,9 +80,9 @@ func (r *NotificationRepositoryImpl) FindByUserID(userID uuid.UUID) ([]models.No
 	return notifications, nil
 }
 
-func (r *NotificationRepositoryImpl) FindUnreadByUserID(userID uuid.UUID) ([]models.Notification, error) {
+func (r *NotificationRepositoryImpl) FindUnreadByUserID(tx *gorm.DB, userID uuid.UUID) ([]models.Notification, error) {
 	var notifications []models.Notification
-	if err := r.DB.
+	if err := r.useDB(tx).
 		Preload("User").
 		Where("user_id = ? AND is_read = ?", userID, false).
 		Find(&notifications).Error; err != nil {
@@ -76,46 +91,53 @@ func (r *NotificationRepositoryImpl) FindUnreadByUserID(userID uuid.UUID) ([]mod
 	return notifications, nil
 }
 
-func (r *NotificationRepositoryImpl) Update(notification *models.Notification) (*models.Notification, error) {
+// ---------- Mutations ----------
 
+func (r *NotificationRepositoryImpl) Update(tx *gorm.DB, notification *models.Notification) (*models.Notification, error) {
 	if notification.ID == uuid.Nil {
-		return nil, fmt.Errorf("Notification ID cannot be empty")
+		return nil, fmt.Errorf("notification ID cannot be empty")
 	}
-
-	if err := r.DB.Save(&notification).Error; err != nil {
+	if err := r.useDB(tx).Save(notification).Error; err != nil {
 		return nil, HandleDatabaseError(err, "notification")
 	}
 	return notification, nil
 }
 
-func (r *NotificationRepositoryImpl) Delete(notificationId string, isHardDelete bool) error {
-	var notification *models.Notification
+func (r *NotificationRepositoryImpl) Delete(tx *gorm.DB, notificationId string, isHardDelete bool) error {
+	db := r.useDB(tx)
 
-	if err := r.DB.Unscoped().First(&notification, "id = ?", notificationId).Error; err != nil {
+	var n models.Notification
+	if err := db.Unscoped().First(&n, "id = ?", notificationId).Error; err != nil {
 		return HandleDatabaseError(err, "notification")
 	}
-	
+
 	if isHardDelete {
-		if err := r.DB.Unscoped().Delete(&notification).Error; err != nil {
+		if err := db.Unscoped().Delete(&n).Error; err != nil {
 			return HandleDatabaseError(err, "notification")
 		}
 	} else {
-		if err := r.DB.Delete(&notification).Error; err != nil {
+		if err := db.Delete(&n).Error; err != nil {
 			return HandleDatabaseError(err, "notification")
 		}
 	}
 	return nil
 }
 
-func (r *NotificationRepositoryImpl) Restore(notification *models.Notification, notificationId string) (*models.Notification, error) {
-	if err := r.DB.Unscoped().Model(notification).Where("id = ?", notificationId).Update("deleted_at", nil).Error; err != nil {
-		return nil, err
+func (r *NotificationRepositoryImpl) Restore(tx *gorm.DB, notificationId string) (*models.Notification, error) {
+	db := r.useDB(tx)
+
+	if err := db.Unscoped().
+		Model(&models.Notification{}).
+		Where("id = ?", notificationId).
+		Update("deleted_at", nil).Error; err != nil {
+		return nil, HandleDatabaseError(err, "notification")
 	}
 
-	var restoredNotification *models.Notification
-	if err := r.DB.Unscoped().First(&restoredNotification, "id = ?", notificationId).Error; err != nil {
-		return nil, err
+	var restored models.Notification
+	if err := db.
+		Preload("User").
+		First(&restored, "id = ?", notificationId).Error; err != nil {
+		return nil, HandleDatabaseError(err, "notification")
 	}
-	
-	return restoredNotification, nil
+	return &restored, nil
 }
