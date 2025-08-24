@@ -230,8 +230,8 @@ func (r *SalesReportRepositoryImpl) GetSalesTrendData(tx *gorm.DB, filters *mode
 		Where("sales_orders.deleted_at IS NULL")
 	q = r.applyFilters(q, db, filters)
 
-	loc, _ := time.LoadLocation("Asia/Jakarta")
-	now := time.Now().In(loc)
+	loc := jakartaLoc()
+ now := time.Now().In(loc)
 
 	hasStart := !filters.StartDate.IsZero()
 	hasEnd := !filters.EndDate.IsZero()
@@ -625,6 +625,13 @@ func (r *SalesReportRepositoryImpl) GetPerformanceData(tx *gorm.DB, filters *mod
 // -------------------------------------------------------
 // Filters (pakai DB dari tx agar konsisten)
 // -------------------------------------------------------
+func jakartaLoc() *time.Location {
+	loc, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+					return time.FixedZone("WIB", 7*60*60)
+	}
+	return loc
+}
 
 func isEmpty(v string) bool {
 	s := strings.TrimSpace(strings.ToLower(v))

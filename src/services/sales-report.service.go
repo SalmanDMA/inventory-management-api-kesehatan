@@ -207,10 +207,17 @@ func (s *SalesReportService) GetSalesPersonIDByUserID(userID uuid.UUID) (uuid.UU
 }
 
 // ===== Helper internal (tetap private) =====
+func jakartaLoc() *time.Location {
+	loc, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+					return time.FixedZone("WIB", 7*60*60)
+	}
+	return loc
+}
 
 func (s *SalesReportService) setDefaultDateRange(filters *models.PaginationRequest) error {
-	loc, _ := time.LoadLocation("Asia/Jakarta")
-	now := time.Now().In(loc)
+	loc := jakartaLoc()
+ now := time.Now().In(loc)
 
 	hasStart := !filters.StartDate.IsZero()
 	hasEnd := !filters.EndDate.IsZero()
