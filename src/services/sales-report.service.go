@@ -2,13 +2,13 @@ package services
 
 import (
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/SalmanDMA/inventory-app/backend/src/helpers/documents"
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
 	"github.com/google/uuid"
+	"github.com/xuri/excelize/v2"
 )
 
 type SalesReportService struct {
@@ -106,7 +106,7 @@ func (s *SalesReportService) GetSalesReportInsights(filters *models.PaginationRe
 	return s.getInsightsData(filters)
 }
 
-func (s *SalesReportService) GenerateSalesReportExcel(filters *models.PaginationRequest) (string, string, error) {
+func (s *SalesReportService) GenerateSalesReportExcel(filters *models.PaginationRequest) (string, *excelize.File, error) {
 	if filters == nil {
 		filters = &models.PaginationRequest{}
 	}
@@ -123,7 +123,7 @@ func (s *SalesReportService) GenerateSalesReportExcel(filters *models.Pagination
 
 		chunk, totalCount, err := s.SalesReportRepo.GetSalesReportDetails(nil, &f)
 		if err != nil {
-			return "", "", err
+			return "", nil, err
 		}
 		all = append(all, chunk...)
 
@@ -156,13 +156,12 @@ func (s *SalesReportService) GenerateSalesReportExcel(filters *models.Pagination
 		})
 	}
 
-	dir := filepath.Join("public", "temp", "excel")
-	fullPath, filename, err := documents.GenerateSalesReportExcel(rows, dir)
+	fileExcel, filename, err := documents.GenerateSalesReportExcel(rows)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to generate excel: %w", err)
+		return "", nil, fmt.Errorf("failed to generate excel: %w", err)
 	}
 
-	return fullPath, filename, nil
+	return filename, fileExcel, nil
 }
 
 func (service *SalesReportService) GenerateSalesReportPDF(soId string) (string, []byte, error) {

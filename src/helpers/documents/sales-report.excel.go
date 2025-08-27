@@ -2,8 +2,6 @@ package documents
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,14 +11,9 @@ import (
 
 // GenerateSalesReportExcel menyimpan file .xlsx ke dir, mengembalikan fullPath & filename
 // Kolom: SO Number | Date | Sales Person | Customer | Area | Status | Payment | Amount
-func GenerateSalesReportExcel(items []models.SalesReportDetailItem, dir string) (string, string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", "", fmt.Errorf("mkdir %s: %w", dir, err)
-	}
-
-	f := excelize.NewFile()
+func GenerateSalesReportExcel(items []models.SalesReportDetailItem) (*excelize.File, string, error) {
+f := excelize.NewFile()
 	const sheet = "Sales Report"
-	// ganti sheet default
 	f.SetSheetName("Sheet1", sheet)
 
 	// Header
@@ -76,7 +69,6 @@ func GenerateSalesReportExcel(items []models.SalesReportDetailItem, dir string) 
 			}
 			return ""
 		}
-
 		values := []interface{}{
 			it.SONumber,
 			it.SODate.Format("02 Jan 2006"),
@@ -91,30 +83,23 @@ func GenerateSalesReportExcel(items []models.SalesReportDetailItem, dir string) 
 			cell, _ := excelize.CoordinatesToCellName(c+1, row)
 			_ = f.SetCellValue(sheet, cell, v)
 		}
-		// Apply styles for the row
 		left, _ := excelize.CoordinatesToCellName(1, row)
 		right, _ := excelize.CoordinatesToCellName(8, row)
 		_ = f.SetCellStyle(sheet, left, right, rowStyle)
-		// Right align & number format for Amount
 		amtCell, _ := excelize.CoordinatesToCellName(8, row)
 		_ = f.SetCellStyle(sheet, amtCell, amtCell, amountStyle)
 	}
 
 	// Column widths
-	_ = f.SetColWidth(sheet, "A", "A", 15) // SO Number
-	_ = f.SetColWidth(sheet, "B", "B", 13) // Date
-	_ = f.SetColWidth(sheet, "C", "C", 22) // Sales Person
-	_ = f.SetColWidth(sheet, "D", "D", 28) // Customer
-	_ = f.SetColWidth(sheet, "E", "E", 18) // Area
-	_ = f.SetColWidth(sheet, "F", "F", 12) // Status
-	_ = f.SetColWidth(sheet, "G", "G", 12) // Payment
-	_ = f.SetColWidth(sheet, "H", "H", 15) // Amount
+	_ = f.SetColWidth(sheet, "A", "A", 15)
+	_ = f.SetColWidth(sheet, "B", "B", 13)
+	_ = f.SetColWidth(sheet, "C", "C", 22)
+	_ = f.SetColWidth(sheet, "D", "D", 28)
+	_ = f.SetColWidth(sheet, "E", "E", 18)
+	_ = f.SetColWidth(sheet, "F", "F", 12)
+	_ = f.SetColWidth(sheet, "G", "G", 12)
+	_ = f.SetColWidth(sheet, "H", "H", 15)
 
 	filename := fmt.Sprintf("sales_report_%s.xlsx", time.Now().Format("20060102_150405"))
-	fullPath := filepath.Join(dir, filename)
-
-	if err := f.SaveAs(fullPath); err != nil {
-		return "", "", fmt.Errorf("save excel: %w", err)
-	}
-	return fullPath, filename, nil
+	return f, filename, nil
 }

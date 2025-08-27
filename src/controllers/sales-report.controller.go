@@ -3,7 +3,7 @@ package controllers
 import (
 	"bytes"
 	"fmt"
-	"os"
+	"io"
 
 	"github.com/SalmanDMA/inventory-app/backend/src/configs"
 	"github.com/SalmanDMA/inventory-app/backend/src/helpers"
@@ -286,13 +286,22 @@ func ExportSalesReportExcel(ctx *fiber.Ctx) error {
 	salesOrderRepo := repositories.NewSalesOrderRepository(configs.DB)
 	svc := services.NewSalesReportService(salesReportRepo, salesPersonRepo, salesOrderRepo)
 
-	path, filename, err := svc.GenerateSalesReportExcel(paginationReq)
+	filename, fileExcel, err := svc.GenerateSalesReportExcel(paginationReq)
 	if err != nil {
 		return helpers.Response(ctx, fiber.StatusInternalServerError, err.Error(), nil)
 	}
-	defer os.Remove(path)
 
-	return ctx.Download(path, filename)
+	ctx.Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	ctx.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+
+	pr, pw := io.Pipe()
+	go func() {
+		_, werr := fileExcel.WriteTo(pw) 
+		_ = fileExcel.Close()            
+		_ = pw.CloseWithError(werr)
+	}()
+
+	return ctx.SendStream(pr, -1)
 }
 
 // Generate PDF Sales Report 

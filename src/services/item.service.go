@@ -100,6 +100,8 @@ func (s *ItemService) GetAllItemsPaginated(req *models.PaginationRequest, userIn
 			UoM:           it.UoM,
 			Description:   it.Description,
 			Batch: 					it.Batch,
+			IsConsignment: it.IsConsignment,
+			DueDate:       it.DueDate,
 			ExpiredAt: 		it.ExpiredAt,
 			Stock:         it.Stock,
 			LowStock:      it.LowStock,
@@ -141,6 +143,8 @@ func (s *ItemService) GetItemByID(itemId string) (*models.ResponseGetItem, error
 			UoM:           it.UoM,
 			Description:   it.Description,
 			Batch: 					it.Batch,
+			IsConsignment: it.IsConsignment,
+			DueDate:       it.DueDate,
 			ExpiredAt: 		it.ExpiredAt,
 			Stock:         it.Stock,
 			LowStock:      it.LowStock,
@@ -188,6 +192,8 @@ func (s *ItemService) CreateItem(req *models.ItemCreateRequest, ctx *fiber.Ctx, 
 		UoMID:       req.UoMID,
 		Description: req.Description,
 		Batch:       req.Batch,
+		IsConsignment: req.IsConsignment,
+		DueDate:     req.DueDate,
 		ExpiredAt:   req.ExpiredAt,
 	}
 
@@ -316,6 +322,12 @@ func (s *ItemService) UpdateItem(req *models.ItemUpdateRequest, itemID string, c
 	}
 	if req.Batch != 0 {
 		item.Batch = req.Batch
+	}
+	if req.IsConsignment != false {
+		item.IsConsignment = req.IsConsignment
+	}
+	if !req.DueDate.IsZero() {
+		item.DueDate = req.DueDate
 	}
 	if !req.ExpiredAt.IsZero() {
 		item.ExpiredAt = req.ExpiredAt

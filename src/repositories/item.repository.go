@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/SalmanDMA/inventory-app/backend/src/models"
 	"github.com/google/uuid"
@@ -19,6 +20,7 @@ type ItemRepository interface {
 	FindAllPaginated(tx *gorm.DB, req *models.PaginationRequest) ([]models.Item, int64, error)
 	FindById(tx *gorm.DB, itemId string, includeTrashed bool) (*models.Item, error)
 	FindByName(tx *gorm.DB, itemName string) (*models.Item, error)
+	FindConsignmentDueBetween(tx *gorm.DB, start, end time.Time) ([]models.Item, error)
 	CountAllThisMonth(tx *gorm.DB) (int64, error)
 	CountAllLastMonth(tx *gorm.DB) (int64, error)
 	CountLowStockNow(tx *gorm.DB) (int64, error)
@@ -156,6 +158,19 @@ func (r *ItemRepositoryImpl) FindByName(tx *gorm.DB, itemName string) (*models.I
 		return nil, HandleDatabaseError(err, "item")
 	}
 	return &item, nil
+}
+
+func (r *ItemRepositoryImpl) FindConsignmentDueBetween(tx *gorm.DB, start, end time.Time) ([]models.Item, error) {
+	var items []models.Item
+	db := r.useDB(tx).
+		Where("is_consignment = ?", true).
+		Where("due_date IS NOT NULL").
+		Where("due_date >= ? AND due_date <= ?", start, end)
+
+	if err := db.Find(&items).Error; err != nil {
+		return nil, HandleDatabaseError(err, "item")
+	}
+	return items, nil
 }
 
 // ---------- Counts ----------

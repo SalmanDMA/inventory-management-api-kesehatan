@@ -19,6 +19,8 @@ type Item struct {
 		ImageID    *uuid.UUID     `gorm:"type:uuid" json:"image_id,omitempty"`
 		Description string        `json:"description"`
 		Batch       int           `gorm:"default:0" json:"batch"`
+		IsConsignment bool        `gorm:"default:false" json:"is_consignment"`
+		DueDate    *time.Time     `json:"due_date"`
 		ExpiredAt  time.Time     `json:"expired_at"`
 		CreatedAt  time.Time      `json:"created_at"`
 		UpdatedAt  time.Time      `json:"updated_at"`
@@ -42,6 +44,8 @@ type ResponseGetItem struct {
 	UoMID       uuid.UUID      `json:"uom_id"`
 	Description string         `json:"description"`
 	Batch       int            `json:"batch"`
+	IsConsignment bool        `json:"is_consignment"`
+	DueDate     *time.Time      `json:"due_date"`
 	ExpiredAt   time.Time      `json:"expired_at"`
 
 	CreatedAt   time.Time      `json:"created_at"`
@@ -64,6 +68,8 @@ type ItemCreateRequest struct {
 	UoMID       uuid.UUID      `json:"uom_id" xml:"uom_id" form:"uom_id" validate:"required"`
 	Description string         `json:"description" xml:"description" form:"description"`
 	Batch       int            `json:"batch" xml:"batch" form:"batch" validate:"required"`
+	IsConsignment bool        `json:"is_consignment" xml:"is_consignment" form:"is_consignment"`
+	DueDate     *time.Time      `json:"due_date" xml:"due_date" form:"due_date"`
 	ExpiredAt   time.Time      `json:"expired_at" xml:"expired_at" form:"expired_at" validate:"required"`
 }
 
@@ -77,6 +83,8 @@ type ItemUpdateRequest struct {
 	UoMID       uuid.UUID      `json:"uom_id" xml:"uom_id" form:"uom_id"`
 	Description string         `json:"description" xml:"description" form:"description"`
 	Batch       int            `json:"batch" xml:"batch" form:"batch"`
+	IsConsignment bool        `json:"is_consignment" xml:"is_consignment" form:"is_consignment"`
+	DueDate     *time.Time      `json:"due_date" xml:"due_date" form:"due_date"`
 	ExpiredAt   time.Time      `json:"expired_at" xml:"expired_at" form:"expired_at"`
 }
 

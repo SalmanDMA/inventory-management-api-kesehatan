@@ -12,7 +12,8 @@ import (
 
 var allowedRoles = map[string][]string{
 	// Low stock
-	"low_stock": {"SUPERADMIN", "DEVELOPER", "MANAGER"},
+	"low_stock": {"SUPERADMIN", "DEVELOPER", "SALES"},
+	"consigment_item": {"SUPERADMIN", "DEVELOPER", "SALES"},
 }
 
 func SendNotificationAuto(
