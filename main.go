@@ -21,8 +21,14 @@ import (
 
 func main() {
 	// Load .env
-	if err := godotenv.Load(".env"); err != nil {
-		log.Fatal("Error loading .env:", err)
+	if _, err := os.Stat(".env"); err == nil {
+    if err := godotenv.Load(".env"); err != nil {
+        log.Printf("⚠️ Failed to load .env: %v (ignored, using system env)", err)
+    } else {
+        log.Println("📄 .env file loaded")
+    }
+	} else {
+					log.Println("ℹ️ .env file not found, using system environment variables")
 	}
 
 	// Setup timezone
