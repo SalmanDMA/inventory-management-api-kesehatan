@@ -1,5 +1,5 @@
 # ---------- Build Stage ----------
-FROM golang:1.23 as builder
+FROM golang:1.23 AS builder
 
 WORKDIR /app
 
@@ -7,7 +7,6 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-
 RUN CGO_ENABLED=0 GOOS=linux go build -o backend main.go
 
 
@@ -22,10 +21,9 @@ RUN apt-get update && \
 WORKDIR /app
 
 COPY --from=builder /app/backend /app/backend
+
+RUN mkdir -p /app/public
 COPY --from=builder /app/public /app/public
 
-ENV TZ=Asia/Jakarta
-
 EXPOSE 8000
-
 CMD ["./backend"]

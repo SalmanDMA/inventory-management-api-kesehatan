@@ -1,20 +1,22 @@
 version: '3.9'
 
 services:
-    backend:
-        build: .
+    app:
+        build:
+            context: .
+            dockerfile: Dockerfile
         container_name: inventory-backend
         restart: always
         ports:
             - '8000:8000'
-        volumes:
-            - ./public:/app/public
         environment:
-            APP_TZ: Asia/Jakarta
+            # App configs
             ALLOWED_ORIGIN: 'http://j400c4ow4ckcgg0s8wsksw4w.93.127.162.185.sslip.io'
             APP_VERSION: '/api/v1'
             BASE_API: 'http://h88ogw8ogswos0wo88okocs8.93.127.162.185.sslip.io'
+            APP_TZ: 'Asia/Jakarta'
 
+            # DB
             DB_HOST: '93.127.162.185'
             DB_NAME: 'inventory_app_kesehatan'
             DB_PASSWORD: 'qugvqOX8zYDVte3lj92zhM08TDRdKPi7nTYwlxmyD87phoh2MpUuT2jeHZvXJ57Q'
@@ -22,9 +24,11 @@ services:
             DB_SSLMODE: 'disable'
             DB_USERNAME: 'postgres'
 
+            # Env
             ENVIRONMENT: 'production'
             JWT_SECRET_KEY: 'adaajaguys'
 
+            # MinIO
             MINIO_ACCESS_KEY: 'admin'
             MINIO_BUCKET_NAME: 'inventory-app'
             MINIO_BUCKET_URL: 'https://minio.protectqube.ai/inventory-app'
@@ -33,4 +37,5 @@ services:
             MINIO_SECRET_KEY: 'admin123'
             MINIO_USE_SSL: 'true'
 
+            # App port
             PORT: '8000'
