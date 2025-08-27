@@ -1,4 +1,3 @@
-// jobs/db_backup.go
 package jobs
 
 import (
