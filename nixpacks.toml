@@ -1,6 +1,17 @@
 [phases.setup]
 nixPkgs = [
-  "go",        
-  "postgresql",
+  "go",
   "tzdata"
 ]
+
+[phases.build]
+nixPkgs = [
+  "postgresql" 
+]
+
+[phases.start]
+nixPkgs = [
+  "postgresql"
+]
+
+cmd = "./out/backend"
