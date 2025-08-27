@@ -21,5 +21,5 @@ RUN apt-get update && \
 WORKDIR /app
 COPY --from=builder /app/backend /app/backend
 
-EXPOSE 8000
+EXPOSE 8200
 CMD ["./backend"]
