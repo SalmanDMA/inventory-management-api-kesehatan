@@ -2,7 +2,6 @@ package jobs
 
 import (
 	"archive/zip"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -46,56 +45,76 @@ func runDatabaseBackup() error {
 	dbname := os.Getenv("DB_NAME")
 	sslmode := os.Getenv("DB_SSLMODE")
 	if sslmode == "" {
-					sslmode = "disable"
+		sslmode = "disable"
 	}
 
 	args := []string{
-					"-h", host,
-					"-p", port,
-					"-U", user,
-					"-d", dbname,
-					"-F", "p",
+		"-h", host,
+		"-p", port,
+		"-U", user,
+		"-d", dbname,
+		"-F", "p", // plain SQL
 	}
 
 	cmd := exec.Command("pg_dump", args...)
 	cmd.Env = append(os.Environ(), "PGPASSWORD="+pass)
 
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("stderr pipe: %w", err)
+	}
 
-	if err := cmd.Run(); err != nil {
-					return fmt.Errorf("pg_dump failed: %v, output: %s", err, out.String())
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("pg_dump start: %w", err)
 	}
 
 	timestamp := time.Now().Format("2006-01-02_150405")
 	sqlFile := fmt.Sprintf("backup_%s.sql", timestamp)
 	zipFile := fmt.Sprintf("backup_%s.zip", timestamp)
 
-	var zipBuf bytes.Buffer
-	zipWriter := zip.NewWriter(&zipBuf)
-	w, err := zipWriter.Create(sqlFile)
-	if err != nil {
-					return fmt.Errorf("zip create: %w", err)
-	}
-	if _, err := io.Copy(w, &out); err != nil {
-					return fmt.Errorf("zip copy: %w", err)
-	}
-	zipWriter.Close()
+	pr, pw := io.Pipe()
+	go func() {
+		zipWriter := zip.NewWriter(pw)
+		w, err := zipWriter.Create(sqlFile)
+		if err != nil {
+			pw.CloseWithError(fmt.Errorf("zip create: %w", err))
+			return
+		}
+
+		if _, err := io.Copy(w, stdout); err != nil {
+			pw.CloseWithError(fmt.Errorf("zip copy: %w", err))
+			return
+		}
+
+		if err := zipWriter.Close(); err != nil {
+			pw.CloseWithError(fmt.Errorf("zip close: %w", err))
+			return
+		}
+		pw.Close()
+	}()
 
 	objectKey := fmt.Sprintf("backups/%s/%s", time.Now().Format("2006-01"), zipFile)
 	_, err = configs.Minio.PutObject(
-					context.Background(),
-					os.Getenv("MINIO_BUCKET_NAME"),
-					objectKey,
-					&zipBuf,
-					int64(zipBuf.Len()),
-					minio.PutObjectOptions{ContentType: "application/zip"},
+		context.Background(),
+		os.Getenv("MINIO_BUCKET_NAME"),
+		objectKey,
+		pr,
+		-1, // unknown size, stream mode
+		minio.PutObjectOptions{ContentType: "application/zip"},
 	)
 	if err != nil {
-					return fmt.Errorf("failed to upload backup: %w", err)
+		return fmt.Errorf("failed upload: %w", err)
 	}
 
-	log.Printf("[DBBackup] ✅ Backup uploaded: %s (%d bytes)", objectKey, zipBuf.Len())
+	if err := cmd.Wait(); err != nil {
+		slurp, _ := io.ReadAll(stderr)
+		return fmt.Errorf("pg_dump error: %v, stderr: %s", err, string(slurp))
+	}
+
+	log.Printf("[DBBackup] ✅ Backup uploaded: %s", objectKey)
 	return nil
 }
