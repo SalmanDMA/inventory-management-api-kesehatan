@@ -10,11 +10,11 @@ import (
 	"github.com/SalmanDMA/inventory-app/backend/src/repositories"
 )
 
-func StartConsignmentDueReminderScheduler() {
+func StartConsignmentDueReminderScheduler(loc *time.Location) {
 	go func() {
 		for {
-			now := time.Now()
-			nextRun := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
+			now := time.Now().In(loc)
+			nextRun := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, loc)
 			if !now.Before(nextRun) {
 				nextRun = nextRun.Add(24 * time.Hour)
 			}
@@ -23,18 +23,18 @@ func StartConsignmentDueReminderScheduler() {
 			log.Printf("[ConsignmentDue] Sleep until %s (in %s)\n", nextRun.Format(time.RFC3339), d)
 			time.Sleep(d)
 
-			if err := runConsignmentDueReminder(); err != nil {
+			if err := runConsignmentDueReminder(loc); err != nil {
 				log.Printf("[ConsignmentDue] ERROR: %v\n", err)
 			}
 		}
 	}()
 }
 
-func runConsignmentDueReminder() error {
+func runConsignmentDueReminder(loc *time.Location) error {
 	itemRepo := repositories.NewItemRepository(configs.DB)
 
-	now := time.Now()
-	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	now := time.Now().In(loc)
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	end := start.AddDate(0, 0, 3).Add(24*time.Hour - time.Nanosecond)
 
 	items, err := itemRepo.FindConsignmentDueBetween(nil, start, end)
@@ -50,7 +50,7 @@ func runConsignmentDueReminder() error {
 		if it.DueDate == nil {
 			continue
 		}
-		daysLeft := int(it.DueDate.Truncate(24*time.Hour).Sub(start) / (24 * time.Hour))
+		daysLeft := int(it.DueDate.In(loc).Truncate(24*time.Hour).Sub(start) / (24 * time.Hour))
 
 		title := fmt.Sprintf("Pengingat Konsinyasi: %s", it.Name)
 		var when string
@@ -64,14 +64,14 @@ func runConsignmentDueReminder() error {
 		}
 
 		msg := fmt.Sprintf("%s (Due: %s). Kode: %s, Stock: %d.",
-			when, it.DueDate.Format("02 Jan 2006"), it.Code, it.Stock)
+			when, it.DueDate.In(loc).Format("02 Jan 2006"), it.Code, it.Stock)
 
 		metadata := map[string]interface{}{
-			"item_id":    it.ID.String(),
-			"item_name":  it.Name,
-			"code":       it.Code,
-			"due_date":   it.DueDate.Format(time.RFC3339),
-			"days_left":  daysLeft,
+			"item_id":       it.ID.String(),
+			"item_name":     it.Name,
+			"code":          it.Code,
+			"due_date":      it.DueDate.In(loc).Format(time.RFC3339),
+			"days_left":     daysLeft,
 			"is_consignment": it.IsConsignment,
 		}
 

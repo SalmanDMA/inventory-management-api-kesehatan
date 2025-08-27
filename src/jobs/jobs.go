@@ -1,5 +1,7 @@
 package jobs
 
-func StartAll() {
-	StartConsignmentDueReminderScheduler()
+import "time"
+
+func StartAll(loc *time.Location) {
+	StartConsignmentDueReminderScheduler(loc)
 }

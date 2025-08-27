@@ -25,30 +25,31 @@ func main() {
 		log.Fatal("Error loading .env:", err)
 	}
 
-	// (Opsional) pastikan timezone Asia/Jakarta untuk job yang pakai time.Now()
-	if tz := os.Getenv("APP_TZ"); tz == "" {
-		_ = os.Setenv("APP_TZ", "Asia/Jakarta")
+	// Setup timezone
+	tz := os.Getenv("APP_TZ")
+	if tz == "" {
+		tz = "Asia/Jakarta"
 	}
-	loc, err := time.LoadLocation(os.Getenv("APP_TZ"))
+	loc, err := time.LoadLocation(tz)
 	if err != nil {
-		log.Printf("⚠️  Failed load location %q: %v (fallback local)", os.Getenv("APP_TZ"), err)
-	} else {
-		time.Local = loc
+		log.Printf("⚠️ Failed load location %q: %v, fallback to WIB fixed offset", tz, err)
+		loc = time.FixedZone("WIB", 7*60*60) // UTC+7
 	}
+	time.Local = loc // set global
+	log.Printf("🌍 Timezone set to %s", loc)
 
-	// Minio, DB, migration
+	// Init services
 	configs.InitMinio()
 	configs.ConnectDB()
 	migrations.RunMigration()
 
-	// ====== Start background jobs here ======
+	// Start background jobs
 	if os.Getenv("DISABLE_JOBS") != "1" {
-		jobs.StartAll() 
+		jobs.StartAll(loc)
 		log.Println("🕒 Background jobs started")
 	} else {
-		log.Println("⏸  Background jobs disabled by env")
+		log.Println("⏸ Background jobs disabled by env")
 	}
-	// ========================================
 
 	// Fiber app
 	app := fiber.New(fiber.Config{
@@ -75,7 +76,7 @@ func main() {
 	log.Printf("✅ Server running at http://localhost:%s", port)
 	log.Printf("📡 WebSocket server available at ws://localhost:%s/ws", port)
 
-	// Graceful shutdown (CTRL+C / SIGTERM)
+	// Graceful shutdown
 	go func() {
 		if err := app.Listen(":" + port); err != nil {
 			log.Fatalf("❌ Server failed: %v", err)
@@ -87,10 +88,9 @@ func main() {
 	<-quit
 	log.Println("🔻 Shutting down server...")
 
-	// Tunggu beberapa detik bila perlu untuk job yang lagi jalan (opsional)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = app.Shutdown() 
+	_ = app.Shutdown()
 
 	<-ctx.Done()
 	log.Println("👋 Bye")
