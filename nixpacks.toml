@@ -1,6 +1,6 @@
 [phases.setup]
 nixPkgs = [
-  "go_1_23",   
-  "postgresql", 
-  "tzdata"      
+  "go",        
+  "postgresql",
+  "tzdata"
 ]
