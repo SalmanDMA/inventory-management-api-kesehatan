@@ -3,5 +3,3 @@ nixPkgs = [
   "postgresql", 
   "tzdata"      
 ]
-
-[phases.build]
