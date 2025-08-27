@@ -7,7 +7,6 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-
 RUN CGO_ENABLED=0 GOOS=linux go build -o backend main.go
 
 
@@ -20,9 +19,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-
 COPY --from=builder /app/backend /app/backend
-COPY --from=builder /app/public /app/public
 
 EXPOSE 8000
 CMD ["./backend"]
