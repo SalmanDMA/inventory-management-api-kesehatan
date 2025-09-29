@@ -20,7 +20,7 @@ services:
             DB_HOST: '93.127.162.185'
             DB_NAME: 'inventory_app_kesehatan'
             DB_PASSWORD: 'qugvqOX8zYDVte3lj92zhM08TDRdKPi7nTYwlxmyD87phoh2MpUuT2jeHZvXJ57Q'
-            DB_PORT: '5432'
+            DB_PORT: '55432'
             DB_SSLMODE: 'disable'
             DB_USERNAME: 'postgres'
 
